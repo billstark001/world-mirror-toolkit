@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "0.1",
+  "minecraftVersion": "1.21.7",
+  "protocolVersion": "26.1.2",
+  "dataVersion": 4438,
+  "minSectionY": -4,
+  "maxSectionY": 19,
+  "aliases": ["26.1.2", "mc-26.1.2"],
+  "packets": [
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 7,
+      "name": "minecraft:registry_data",
+      "kind": "REGISTRY_DATA",
+      "parser": "raw-registry-data/v1",
+      "confidence": "confirmed-by-original-tooling"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 45,
+      "name": "minecraft:level_chunk_with_light",
+      "kind": "LEVEL_CHUNK_WITH_LIGHT",
+      "parser": "level-chunk-with-light/v1",
+      "confidence": "confirmed-by-original-tooling"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 7,
+      "name": "minecraft:block_entity_data",
+      "kind": "BLOCK_ENTITY_DATA",
+      "parser": "raw-nbt-network/v1",
+      "confidence": "legacy-overlap"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 49,
+      "name": "minecraft:login",
+      "kind": "LOGIN",
+      "parser": "raw-login/v1",
+      "confidence": "legacy"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 82,
+      "name": "minecraft:respawn",
+      "kind": "RESPAWN",
+      "parser": "raw-respawn/v1",
+      "confidence": "legacy"
+    }
+  ]
+}

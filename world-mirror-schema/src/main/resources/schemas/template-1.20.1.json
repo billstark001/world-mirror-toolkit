@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "0.1",
+  "minecraftVersion": "1.20.1-template",
+  "protocolVersion": "template",
+  "dataVersion": 3465,
+  "minSectionY": -4,
+  "maxSectionY": 19,
+  "aliases": ["1.20.1-template"],
+  "packets": [
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": -1,
+      "name": "minecraft:level_chunk_with_light",
+      "kind": "LEVEL_CHUNK_WITH_LIGHT",
+      "parser": "level-chunk-with-light/v1",
+      "confidence": "template-requires-real-packet-id"
+    }
+  ]
+}

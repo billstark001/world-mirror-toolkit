@@ -1,0 +1,28 @@
+.gradle/
+build/
+**/build/
+out/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code
+.vscode/
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Local logs and scratch files
+*.log
+*.tmp
+*.swp
+*.swo

@@ -38,12 +38,21 @@ public final class PortableNbtWriter {
     private void writePayload(DataOutputStream out, NbtValue value) throws IOException {
         switch (value) {
             case NbtValue.ByteValue v -> out.writeByte(v.value());
+            case NbtValue.ShortValue v -> out.writeShort(v.value());
             case NbtValue.IntValue v -> out.writeInt(v.value());
             case NbtValue.LongValue v -> out.writeLong(v.value());
+            case NbtValue.FloatValue v -> out.writeFloat(v.value());
+            case NbtValue.DoubleValue v -> out.writeDouble(v.value());
             case NbtValue.StringValue v -> writeStringPayload(out, v.value());
             case NbtValue.ByteArrayValue v -> {
                 out.writeInt(v.value().length);
                 out.write(v.value());
+            }
+            case NbtValue.IntArrayValue v -> {
+                out.writeInt(v.value().length);
+                for (int item : v.value()) {
+                    out.writeInt(item);
+                }
             }
             case NbtValue.LongArrayValue v -> {
                 out.writeInt(v.value().length);

@@ -4,12 +4,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import dev.worldmirror.toolkit.anvil.AnalysisWorldExporter;
 import dev.worldmirror.toolkit.anvil.QuerzNbtBridge;
+import dev.worldmirror.toolkit.anvil.RegistryMappings;
 import dev.worldmirror.toolkit.core.DimensionKey;
 import dev.worldmirror.toolkit.replay.McprInputResolver;
 import dev.worldmirror.toolkit.replay.ReplayIndexWriter;
 import dev.worldmirror.toolkit.replay.ReplaySource;
 import dev.worldmirror.toolkit.schema.ProtocolSchema;
 import dev.worldmirror.toolkit.schema.SchemaRepository;
+import dev.worldmirror.toolkit.schema.generation.RegistryMappingsGenerator;
+import dev.worldmirror.toolkit.schema.generation.SchemaSkeletonGenerator;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +30,8 @@ import picocli.CommandLine.Option;
         subcommands = {
             WorldMirrorCli.IndexCommand.class,
             WorldMirrorCli.ExportAnalysisCommand.class,
+            WorldMirrorCli.GenerateRegistryMappingsCommand.class,
+            WorldMirrorCli.GenerateSchemaCommand.class,
             WorldMirrorCli.SchemasCommand.class,
             WorldMirrorCli.SelfTestCommand.class
         })
@@ -77,15 +82,107 @@ public final class WorldMirrorCli implements Callable<Integer> {
         @Option(names = "--dimension", defaultValue = "minecraft:overworld", description = "dimension key to attach recovered chunks to")
         String dimension;
 
+        @Option(names = "--registry-mappings", description = "source-derived registry mapping JSON; defaults to TEMP_REPLAY_MOD_EXT/generated_mappings/registries_26.1.2.json when present")
+        Path registryMappings;
+
         @Override
         public Integer call() throws Exception {
             ProtocolSchema schema = SchemaRepository.loadBundled(schemaFiles).require(version);
-            AnalysisWorldExporter exporter = new AnalysisWorldExporter(schema);
+            RegistryMappings mappings = RegistryMappings.load(resolveRegistryMappings());
+            AnalysisWorldExporter exporter = new AnalysisWorldExporter(schema, mappings);
             try (ReplaySource source = McprInputResolver.open(input)) {
                 AnalysisWorldExporter.ExportSummary summary = exporter.export(source, out, new DimensionKey(dimension));
                 ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
                 System.out.println(mapper.writeValueAsString(summary.asMap()));
             }
+            return 0;
+        }
+
+        private Path resolveRegistryMappings() {
+            if (registryMappings != null) {
+                return registryMappings;
+            }
+            List<Path> candidates = List.of(
+                    Path.of("TEMP_REPLAY_MOD_EXT", "generated_mappings", "registries_26.1.2.json"),
+                    Path.of("..", "TEMP_REPLAY_MOD_EXT", "generated_mappings", "registries_26.1.2.json"),
+                    Path.of("generated_mappings", "registries_26.1.2.json"));
+            for (Path candidate : candidates) {
+                if (candidate.toFile().isFile()) {
+                    return candidate.normalize();
+                }
+            }
+            throw new CommandLine.ParameterException(new CommandLine(this),
+                    "missing --registry-mappings; expected 26.1.2 mapping JSON");
+        }
+    }
+
+    @Command(name = "generate-registry-mappings", description = "Generate registry mapping JSON by running a small dumper against a named Minecraft jar.")
+    static final class GenerateRegistryMappingsCommand implements Callable<Integer> {
+        @Option(names = {"-v", "--minecraft-version"}, description = "Minecraft/launcher version id; used to resolve Mojang metadata when --version-json is omitted")
+        String minecraftVersion;
+
+        @Option(names = "--version-json", description = "local Mojang version JSON; if omitted it is downloaded from Mojang version_manifest_v2")
+        Path versionJson;
+
+        @Option(names = "--client-jar", description = "local named/remapped client jar; if omitted the official client jar is downloaded from the version JSON")
+        Path clientJar;
+
+        @Option(names = "--work-dir", defaultValue = "generated_mappings/java", description = "download/cache and temporary compilation directory")
+        Path workDir;
+
+        @Option(names = {"-o", "--out"}, defaultValue = "generated_mappings/registries.json", description = "output registry mapping JSON")
+        Path out;
+
+        @Option(names = "--java-home", description = "JDK used to compile/run the registry dumper; 26.1.2 requires Java 25")
+        Path javaHome;
+
+        @Override
+        public Integer call() throws Exception {
+            RegistryMappingsGenerator generator = new RegistryMappingsGenerator();
+            RegistryMappingsGenerator.Result result = generator.generate(new RegistryMappingsGenerator.Options(
+                    minecraftVersion, versionJson, clientJar, workDir, out, javaHome));
+            ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+            System.out.println(mapper.writeValueAsString(result.asMap()));
+            return 0;
+        }
+    }
+
+    @Command(name = "generate-schema", description = "Generate a metadata-derived schema skeleton; packet ids still require source/bytecode verification.")
+    static final class GenerateSchemaCommand implements Callable<Integer> {
+        @Option(names = {"-v", "--minecraft-version"}, description = "Minecraft/launcher version id; used to resolve Mojang metadata when --version-json is omitted")
+        String minecraftVersion;
+
+        @Option(names = "--protocol-version", description = "protocol/source version label to place in the schema")
+        String protocolVersion;
+
+        @Option(names = "--data-version", required = true, description = "DataVersion to place in the schema; registry generation prints this value")
+        int dataVersion;
+
+        @Option(names = "--min-section-y", defaultValue = "-4", description = "minimum chunk section y")
+        int minSectionY;
+
+        @Option(names = "--max-section-y", defaultValue = "19", description = "maximum chunk section y")
+        int maxSectionY;
+
+        @Option(names = "--version-json", description = "local Mojang version JSON; if omitted it is downloaded from Mojang version_manifest_v2")
+        Path versionJson;
+
+        @Option(names = "--client-jar", description = "optional client jar path; downloaded if omitted")
+        Path clientJar;
+
+        @Option(names = "--work-dir", defaultValue = "generated_schema/java", description = "download/cache directory")
+        Path workDir;
+
+        @Option(names = {"-o", "--out"}, required = true, description = "output schema JSON")
+        Path out;
+
+        @Override
+        public Integer call() throws Exception {
+            SchemaSkeletonGenerator generator = new SchemaSkeletonGenerator();
+            SchemaSkeletonGenerator.Result result = generator.generate(new SchemaSkeletonGenerator.Options(
+                    minecraftVersion, protocolVersion, dataVersion, minSectionY, maxSectionY, versionJson, clientJar, workDir, out));
+            ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+            System.out.println(mapper.writeValueAsString(result.asMap()));
             return 0;
         }
     }

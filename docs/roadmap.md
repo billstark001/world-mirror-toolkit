@@ -8,6 +8,8 @@
 - Write analysis `.mca` files.
 - Remove byte-offset heuristic scanners.
 
+Status: complete for the 26.1.2 replay sample.
+
 ## Phase 2: convert packet chunks into conventional Anvil chunks
 
 - Add block-state registry resources: network global state id -> `{Name, Properties}`.
@@ -16,12 +18,16 @@
 - Write light arrays into the right section tags.
 - Generate heightmaps or copy reliable network heightmaps.
 
+Status: block states and light arrays are implemented for 26.1.2. Biomes still use a valid placeholder palette. Heightmaps are not yet written.
+
 ## Phase 3: stateful replay merge
 
 - Track dimension changes from login/respawn packets.
 - Merge block update packets after chunk load.
 - Merge block entity update packets after chunk load.
 - Track entity spawn/metadata/position packets into entity NBT.
+
+Status: login/respawn dimension tracking is implemented for 26.1.2. Incremental block/entity merge remains open.
 
 ## Phase 4: playable save output
 

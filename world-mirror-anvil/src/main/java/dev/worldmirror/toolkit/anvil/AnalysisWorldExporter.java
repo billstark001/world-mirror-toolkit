@@ -22,43 +22,79 @@ public final class AnalysisWorldExporter {
     private final AnalysisChunkBuilder chunkBuilder;
     private final RegionFileWriter regionWriter = new RegionFileWriter();
 
-    public AnalysisWorldExporter(ProtocolSchema schema) {
+    public AnalysisWorldExporter(ProtocolSchema schema, RegistryMappings mappings) {
         this.schema = schema;
         this.decoder = new ReplayProtocolDecoder(schema);
-        this.chunkBuilder = new AnalysisChunkBuilder(schema);
+        mappings.requireUsable();
+        this.chunkBuilder = new AnalysisChunkBuilder(schema, mappings);
     }
 
-    public ExportSummary export(ReplaySource source, Path outDir, DimensionKey dimension) throws IOException {
+    public ExportSummary export(ReplaySource source, Path outDir, DimensionKey initialDimension) throws IOException {
         Files.createDirectories(outDir);
-        Map<ChunkPos, DecodedChunkPacket> latest = new HashMap<>();
-        Map<ChunkPos, Integer> counts = new HashMap<>();
+        Map<DimensionChunkKey, DecodedChunkPacket> latest = new HashMap<>();
+        Map<DimensionChunkKey, Integer> counts = new HashMap<>();
+        Map<String, Integer> chunksByDimension = new TreeMap<>();
         long[] eventCount = new long[1];
         long[] chunkPacketCount = new long[1];
+        DimensionKey[] currentDimension = new DimensionKey[] {initialDimension};
+        long[] dimensionSwitches = new long[1];
         source.forEach(event -> {
             eventCount[0]++;
-            decoder.tryDecodeChunk(event, dimension).ifPresent(chunk -> {
-                latest.put(chunk.chunkPos(), chunk);
-                counts.merge(chunk.chunkPos(), 1, Integer::sum);
+            decoder.tryDecodeDimensionSwitch(event).ifPresent(dimension -> {
+                currentDimension[0] = dimension;
+                dimensionSwitches[0]++;
+                System.out.println("dimension switch @ event " + event.index() + " t=" + event.timestampMillis() + " -> " + dimension.value());
+            });
+            decoder.tryDecodeChunk(event, currentDimension[0]).ifPresent(chunk -> {
+                DimensionChunkKey key = new DimensionChunkKey(chunk.dimension(), chunk.chunkPos());
+                latest.put(key, chunk);
+                counts.merge(key, 1, Integer::sum);
                 chunkPacketCount[0]++;
+                if (chunkPacketCount[0] % 1000 == 0) {
+                    System.out.println("scanned events=" + eventCount[0] + " chunkPackets=" + chunkPacketCount[0] + " uniqueChunks=" + latest.size());
+                }
             });
         });
 
-        Map<RegionPos, Map<ChunkPos, NbtValue.CompoundValue>> byRegion = new TreeMap<>();
-        for (Map.Entry<ChunkPos, DecodedChunkPacket> entry : latest.entrySet()) {
-            ChunkPos pos = entry.getKey();
-            byRegion.computeIfAbsent(pos.region(), ignored -> new TreeMap<>())
-                    .put(pos, chunkBuilder.build(entry.getValue(), counts.getOrDefault(pos, 1)));
+        Map<DimensionKey, Map<RegionPos, Map<ChunkPos, NbtValue.CompoundValue>>> byDimension = new TreeMap<>((a, b) -> a.value().compareTo(b.value()));
+        int built = 0;
+        for (Map.Entry<DimensionChunkKey, DecodedChunkPacket> entry : latest.entrySet()) {
+            DimensionChunkKey key = entry.getKey();
+            ChunkPos pos = key.chunkPos();
+            byDimension.computeIfAbsent(key.dimension(), ignored -> new TreeMap<>())
+                    .computeIfAbsent(pos.region(), ignored -> new TreeMap<>())
+                    .put(pos, chunkBuilder.build(entry.getValue(), counts.getOrDefault(key, 1)));
+            built++;
+            if (built % 500 == 0) {
+                System.out.println("built chunks=" + built + "/" + latest.size());
+            }
         }
 
-        Path regionDir = outDir.resolve("region");
-        Files.createDirectories(regionDir);
-        for (Map.Entry<RegionPos, Map<ChunkPos, NbtValue.CompoundValue>> entry : byRegion.entrySet()) {
-            regionWriter.write(regionDir.resolve(entry.getKey().fileName()), entry.getValue());
+        int regionsWritten = 0;
+        for (Map.Entry<DimensionKey, Map<RegionPos, Map<ChunkPos, NbtValue.CompoundValue>>> dimensionEntry : byDimension.entrySet()) {
+            Path dimensionDir = dimensionPath(outDir, dimensionEntry.getKey());
+            Path regionDir = dimensionDir.resolve("region");
+            Files.createDirectories(regionDir);
+            int dimensionChunks = 0;
+            for (Map.Entry<RegionPos, Map<ChunkPos, NbtValue.CompoundValue>> regionEntry : dimensionEntry.getValue().entrySet()) {
+                dimensionChunks += regionEntry.getValue().size();
+                System.out.println("writing " + dimensionEntry.getKey().value() + " " + regionEntry.getKey().fileName() + " chunks=" + regionEntry.getValue().size());
+                regionWriter.write(regionDir.resolve(regionEntry.getKey().fileName()), regionEntry.getValue());
+                regionsWritten++;
+            }
+            chunksByDimension.put(dimensionEntry.getKey().value(), dimensionChunks);
         }
-        return new ExportSummary(schema.minecraftVersion(), eventCount[0], chunkPacketCount[0], latest.size(), byRegion.size(), outDir);
+        return new ExportSummary(schema.minecraftVersion(), eventCount[0], chunkPacketCount[0], latest.size(), regionsWritten, dimensionSwitches[0], chunksByDimension, outDir);
     }
 
-    public record ExportSummary(String minecraftVersion, long eventsRead, long chunkPacketsRead, int chunksWritten, int regionsWritten, Path outputDirectory) {
+    private Path dimensionPath(Path outDir, DimensionKey dimension) {
+        String subdir = dimension.saveSubdirectory();
+        return ".".equals(subdir) ? outDir : outDir.resolve(subdir);
+    }
+
+    private record DimensionChunkKey(DimensionKey dimension, ChunkPos chunkPos) {}
+
+    public record ExportSummary(String minecraftVersion, long eventsRead, long chunkPacketsRead, int chunksWritten, int regionsWritten, long dimensionSwitches, Map<String, Integer> chunksByDimension, Path outputDirectory) {
         public Map<String, Object> asMap() {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("minecraft_version", minecraftVersion);
@@ -66,6 +102,8 @@ public final class AnalysisWorldExporter {
             out.put("chunk_packets_read", chunkPacketsRead);
             out.put("chunks_written", chunksWritten);
             out.put("regions_written", regionsWritten);
+            out.put("dimension_switches", dimensionSwitches);
+            out.put("chunks_by_dimension", chunksByDimension);
             out.put("output_directory", outputDirectory.toString());
             return out;
         }

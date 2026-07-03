@@ -8,4 +8,13 @@ public enum NbtTagId {
 
     NbtTagId(int id) { this.id = id; }
     public int id() { return id; }
+
+    public static NbtTagId fromId(int id) {
+        for (NbtTagId tag : values()) {
+            if (tag.id == id) {
+                return tag;
+            }
+        }
+        throw new IllegalArgumentException("unknown NBT tag id " + id);
+    }
 }

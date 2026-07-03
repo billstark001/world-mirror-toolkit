@@ -5,6 +5,8 @@ import dev.worldmirror.toolkit.core.ChunkPos;
 import dev.worldmirror.toolkit.core.DimensionKey;
 import dev.worldmirror.toolkit.core.ParseException;
 import dev.worldmirror.toolkit.replay.ReplayEvent;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Parser for the legacy/26.1.2 chunk layout used by the original Python proof of concept.
@@ -25,13 +27,17 @@ public final class LevelChunkWithLightV1Parser {
         cursor.skip(chunkDataLength);
         int chunkDataEnd = cursor.offset();
         int blockEntityCount = cursor.readVarInt();
+        List<DecodedChunkPacket.BlockEntity> blockEntities = new ArrayList<>(blockEntityCount);
         for (int i = 0; i < blockEntityCount; i++) {
-            cursor.skip(3); // packed local xz + y short in current ClientboundLevelChunkPacketData layout
-            cursor.readVarInt(); // block entity type id
+            int packedXZ = cursor.readUnsignedByte();
+            int y = cursor.readShort();
+            int typeId = cursor.readVarInt();
             if (cursor.remaining() <= 0) {
                 throw new ParseException("missing block entity NBT in chunk " + chunkX + "," + chunkZ);
             }
+            int nbtStart = cursor.offset();
             nbtSkipper.skipUnnamedRoot(cursor);
+            blockEntities.add(new DecodedChunkPacket.BlockEntity(packedXZ, y, typeId, cursor.slice(nbtStart, cursor.offset())));
         }
         byte[] rawChunkData = cursor.slice(chunkDataStart, chunkDataEnd);
         byte[] rawLightData = cursor.slice(cursor.offset(), cursor.data().length);
@@ -42,7 +48,7 @@ public final class LevelChunkWithLightV1Parser {
                 new ChunkPos(chunkX, chunkZ),
                 rawChunkData,
                 rawLightData,
-                blockEntityCount,
+                List.copyOf(blockEntities),
                 "level-chunk-with-light/v1");
     }
 

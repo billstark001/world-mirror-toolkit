@@ -67,7 +67,7 @@ For the verified 26.1.2 jar, the generated registry summary is:
 - `block_entity_types`: `49`
 - `biomes`: `1`
 
-The current biome mapping is intentionally minimal. The chunk writer uses a single valid `minecraft:plains` biome palette because the full biome registry is dynamic and has not yet been reconstructed from replay registry data.
+The generated mapping's static `biomes` field is intentionally minimal. The chunk writer now reads the dynamic biome registry from configuration packets and reconstructs each section's real biome palette.
 
 ## Obfuscated Jars
 
@@ -143,7 +143,7 @@ For chunks intended to be readable by Minecraft and external tools:
 - `structures` should contain empty `starts` and `References` compounds if no structure data is available.
 - Keep raw replay bytes under `ReplayRecovered` for auditability.
 
-The Java exporter currently does not generate entities, POI regions, `level.dat`, heightmaps, or real biome palettes.
+The Java exporter currently does not generate entities, POI regions, `level.dat`, or heightmaps. It reconstructs biome palettes from the replay registry.
 
 ## Memory and Progress
 

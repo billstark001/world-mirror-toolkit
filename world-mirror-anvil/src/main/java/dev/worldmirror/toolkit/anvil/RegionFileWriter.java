@@ -19,6 +19,9 @@ public final class RegionFileWriter {
     private final PortableNbtWriter nbtWriter = new PortableNbtWriter();
 
     public void write(Path regionPath, Map<ChunkPos, NbtValue.CompoundValue> chunks) throws IOException {
+        if (chunks.isEmpty()) {
+            return;
+        }
         IoUtil.createParentDirectories(regionPath);
         byte[] locations = new byte[SECTOR_BYTES];
         byte[] timestamps = new byte[SECTOR_BYTES];

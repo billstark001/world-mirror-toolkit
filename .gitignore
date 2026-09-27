@@ -29,3 +29,5 @@ Thumbs.db
 
 TMP_*
 TEMP_*
+generated_mappings/
+logs/

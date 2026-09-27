@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Builds an audit-friendly Anvil chunk root from replay-derived data. */
 public final class AnalysisChunkBuilder {
@@ -20,9 +21,18 @@ public final class AnalysisChunkBuilder {
         this.mappings = mappings;
     }
 
-    public NbtValue.CompoundValue build(DecodedChunkPacket packet, int packetCountForChunk) {
-        ChunkSectionDecoder.DecodeResult sectionResult = sectionDecoder.decode(packet.rawChunkData(), mappings, schema.minSectionY());
-        LightDataDecoder.DecodeResult lightResult = lightDecoder.decode(packet.rawLightData(), schema.minSectionY() - 1);
+    public Optional<NbtValue.CompoundValue> build(DecodedChunkPacket packet, int packetCountForChunk) {
+        return build(packet, packetCountForChunk, Map.of(), schema.minSectionY());
+    }
+
+    public Optional<NbtValue.CompoundValue> build(DecodedChunkPacket packet, int packetCountForChunk, Map<Integer, String> biomes) {
+        return build(packet, packetCountForChunk, biomes, schema.minSectionY());
+    }
+
+    public Optional<NbtValue.CompoundValue> build(DecodedChunkPacket packet, int packetCountForChunk,
+            Map<Integer, String> biomes, int minSectionY) {
+        ChunkSectionDecoder.DecodeResult sectionResult = sectionDecoder.decode(packet.rawChunkData(), mappings, minSectionY, biomes);
+        LightDataDecoder.DecodeResult lightResult = lightDecoder.decode(packet.rawLightData(), minSectionY - 1);
         List<NbtValue.CompoundValue> sections = new ArrayList<>();
         for (NbtValue.CompoundValue section : sectionResult.sections()) {
             Map<String, NbtValue> values = new LinkedHashMap<>(section.values());
@@ -38,6 +48,10 @@ public final class AnalysisChunkBuilder {
                 }
             }
             sections.add(NbtValue.compound(values));
+        }
+        List<NbtValue> blockEntities = buildBlockEntities(packet);
+        if (sections.isEmpty() && blockEntities.isEmpty()) {
+            return Optional.empty();
         }
 
         List<NbtValue> warnings = new ArrayList<>();
@@ -63,14 +77,14 @@ public final class AnalysisChunkBuilder {
         Map<String, NbtValue> root = new LinkedHashMap<>();
         root.put("DataVersion", NbtValue.intValue(mappings.dataVersion()));
         root.put("xPos", NbtValue.intValue(packet.chunkPos().x()));
-        root.put("yPos", NbtValue.intValue(schema.minSectionY()));
+        root.put("yPos", NbtValue.intValue(minSectionY));
         root.put("zPos", NbtValue.intValue(packet.chunkPos().z()));
         root.put("Status", NbtValue.stringValue("minecraft:full"));
         root.put("LastUpdate", NbtValue.longValue(0));
         root.put("InhabitedTime", NbtValue.longValue(0));
         root.put("isLightOn", NbtValue.byteValue(!lightResult.block().isEmpty() || !lightResult.sky().isEmpty()));
         root.put("sections", NbtValue.list(NbtTagId.COMPOUND, new ArrayList<>(sections)));
-        root.put("block_entities", NbtValue.list(NbtTagId.COMPOUND, buildBlockEntities(packet)));
+        root.put("block_entities", NbtValue.list(NbtTagId.COMPOUND, blockEntities));
         root.put("entities", NbtValue.list(NbtTagId.COMPOUND, List.of()));
         root.put("block_ticks", NbtValue.list(NbtTagId.COMPOUND, List.of()));
         root.put("fluid_ticks", NbtValue.list(NbtTagId.COMPOUND, List.of()));
@@ -78,7 +92,7 @@ public final class AnalysisChunkBuilder {
         root.put("Heightmaps", NbtValue.compound(new LinkedHashMap<>()));
         root.put("structures", emptyStructures());
         root.put("ReplayRecovered", NbtValue.compound(replay));
-        return NbtValue.compound(root);
+        return Optional.of(NbtValue.compound(root));
     }
 
     private List<NbtValue> buildBlockEntities(DecodedChunkPacket packet) {

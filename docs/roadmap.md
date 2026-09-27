@@ -18,16 +18,16 @@ Status: complete for the 26.1.2 replay sample.
 - Write light arrays into the right section tags.
 - Generate heightmaps or copy reliable network heightmaps.
 
-Status: block states and light arrays are implemented for 26.1.2. Biomes still use a valid placeholder palette. Heightmaps are not yet written.
+Status: block states, light arrays, and replay-sourced biome palettes are implemented for 26.1.2 and 26.2, with 26.3 mappings and schema ready. Heightmaps are not yet written.
 
 ## Phase 3: stateful replay merge
 
-- Track dimension changes from login/respawn packets.
+- Track world identity, dimension changes, and dimension-type heights from login/respawn and registry packets.
 - Merge block update packets after chunk load.
 - Merge block entity update packets after chunk load.
 - Track entity spawn/metadata/position packets into entity NBT.
 
-Status: login/respawn dimension tracking is implemented for 26.1.2. Incremental block/entity merge remains open.
+Status: world identity, dimension, and dimension-type height tracking are verified for the 26.2 replay; dimension tracking was also verified for 26.1.2. Incremental block/entity merge remains open.
 
 ## Phase 4: playable save output
 

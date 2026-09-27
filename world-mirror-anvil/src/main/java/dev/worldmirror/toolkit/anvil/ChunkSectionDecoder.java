@@ -1,6 +1,7 @@
 package dev.worldmirror.toolkit.anvil;
 
 import dev.worldmirror.toolkit.core.ByteCursor;
+import dev.worldmirror.toolkit.core.ParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -10,39 +11,37 @@ final class ChunkSectionDecoder {
     private static final int BLOCK_ENTRIES = 4096;
     private static final int BIOME_ENTRIES = 64;
 
-    DecodeResult decode(byte[] raw, RegistryMappings mappings, int minSectionY) {
+    DecodeResult decode(byte[] raw, RegistryMappings mappings, int minSectionY, Map<Integer, String> biomes) {
         ByteCursor cursor = new ByteCursor(raw);
         List<NbtValue.CompoundValue> sections = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
         int sectionIndex = 0;
         while (cursor.hasRemaining()) {
             int sectionY = minSectionY + sectionIndex;
-            int start = cursor.offset();
             try {
                 int nonEmptyBlocks = cursor.readShort();
                 cursor.readShort(); // non-empty fluid count
                 int bits = cursor.readUnsignedByte();
                 PaletteData blockData = readPalette(cursor, bits, BLOCK_ENTRIES, true);
                 int biomeBits = cursor.readUnsignedByte();
-                readPalette(cursor, biomeBits, BIOME_ENTRIES, false);
-                NbtValue.CompoundValue section = buildSection(sectionY, nonEmptyBlocks, bits, blockData, mappings);
+                PaletteData biomeData = readPalette(cursor, biomeBits, BIOME_ENTRIES, false);
+                NbtValue.CompoundValue section = buildSection(sectionY, nonEmptyBlocks, bits, blockData, biomeBits, biomeData, mappings, biomes);
                 if (section != null) {
                     sections.add(section);
                 }
             } catch (RuntimeException ex) {
-                warnings.add("section " + sectionIndex + " decode failed at byte " + cursor.offset() + ": " + ex.getMessage());
-                cursor.offset(start);
-                break;
+                throw new ParseException("section " + sectionIndex + " decode failed at byte " + cursor.offset(), ex);
             }
             sectionIndex++;
         }
         if (cursor.offset() != raw.length) {
-            warnings.add("section buffer ended at " + cursor.offset() + ", length " + raw.length);
+            throw new ParseException("section buffer ended at " + cursor.offset() + ", length " + raw.length);
         }
         return new DecodeResult(sections, warnings);
     }
 
-    private NbtValue.CompoundValue buildSection(int sectionY, int nonEmptyBlocks, int sourceBits, PaletteData source, RegistryMappings mappings) {
+    private NbtValue.CompoundValue buildSection(int sectionY, int nonEmptyBlocks, int sourceBits, PaletteData source,
+            int biomeBits, PaletteData biomeData, RegistryMappings mappings, Map<Integer, String> biomes) {
         List<NbtValue.CompoundValue> diskPalette = new ArrayList<>();
         List<Integer> diskValues = new ArrayList<>();
         long[] dataLongs = source.rawLongs();
@@ -90,16 +89,46 @@ final class ChunkSectionDecoder {
                     : packBits(diskValues, diskBits)));
         }
 
-        Map<String, NbtValue> biomes = new LinkedHashMap<>();
-        // The 26.1.2 biome registry is dynamic in replay packets. Until that registry stream is
-        // reconstructed, a single valid biome keeps vanilla and external Anvil tools able to read.
-        biomes.put("palette", NbtValue.list(NbtTagId.STRING, List.of(NbtValue.stringValue("minecraft:plains"))));
+        Map<String, NbtValue> biomeTag = buildBiomes(biomeBits, biomeData, biomes);
 
         Map<String, NbtValue> section = new LinkedHashMap<>();
         section.put("Y", NbtValue.byteValue(sectionY));
         section.put("block_states", NbtValue.compound(blockStates));
-        section.put("biomes", NbtValue.compound(biomes));
+        section.put("biomes", NbtValue.compound(biomeTag));
         return NbtValue.compound(section);
+    }
+
+    private Map<String, NbtValue> buildBiomes(int sourceBits, PaletteData source, Map<Integer, String> names) {
+        if (names.isEmpty()) throw new IllegalArgumentException("replay contains no biome registry");
+        List<Integer> globalIds = sourceBits == 0 ? List.of(source.palette().getFirst())
+                : sourceBits < 4 ? source.palette() : source.values();
+        Map<Integer, Integer> index = new LinkedHashMap<>();
+        List<NbtValue> palette = new ArrayList<>();
+        for (int id : globalIds) {
+            if (index.containsKey(id)) continue;
+            String name = names.get(id);
+            if (name == null) throw new IllegalArgumentException("unknown biome registry id " + id);
+            index.put(id, palette.size());
+            palette.add(NbtValue.stringValue(name));
+        }
+        Map<String, NbtValue> out = new LinkedHashMap<>();
+        out.put("palette", NbtValue.list(NbtTagId.STRING, palette));
+        if (palette.size() > 1) {
+            int diskBits = Math.max(1, 32 - Integer.numberOfLeadingZeros(palette.size() - 1));
+            if (sourceBits > 0 && sourceBits < 4 && diskBits == sourceBits && index.size() == source.palette().size()) {
+                out.put("data", NbtValue.longArray(source.rawLongs()));
+            } else {
+                List<Integer> sourceValues = sourceBits == 0 ? List.of()
+                        : sourceBits < 4 ? unpackBits(source.rawLongs(), sourceBits, BIOME_ENTRIES) : source.values();
+                List<Integer> diskValues = new ArrayList<>(BIOME_ENTRIES);
+                for (int value : sourceValues) {
+                    int id = sourceBits < 4 ? source.palette().get(value) : value;
+                    diskValues.add(index.get(id));
+                }
+                out.put("data", NbtValue.longArray(packBits(diskValues, diskBits)));
+            }
+        }
+        return out;
     }
 
     private PaletteData readPalette(ByteCursor cursor, int bits, int entries, boolean blockPalette) {

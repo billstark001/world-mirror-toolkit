@@ -9,6 +9,7 @@ import dev.worldmirror.toolkit.core.DimensionKey;
 import dev.worldmirror.toolkit.replay.McprInputResolver;
 import dev.worldmirror.toolkit.replay.ReplayIndexWriter;
 import dev.worldmirror.toolkit.replay.ReplaySource;
+import dev.worldmirror.toolkit.replay.ReplayMetadata;
 import dev.worldmirror.toolkit.schema.ProtocolSchema;
 import dev.worldmirror.toolkit.schema.SchemaRepository;
 import dev.worldmirror.toolkit.schema.generation.RegistryMappingsGenerator;
@@ -73,7 +74,7 @@ public final class WorldMirrorCli implements Callable<Integer> {
         @Option(names = {"-o", "--out"}, required = true, description = "output world/dimension directory")
         Path out;
 
-        @Option(names = {"-v", "--version"}, defaultValue = "1.21.7", description = "schema version or alias; use `schemas` to list bundled schemas")
+        @Option(names = {"-v", "--version"}, description = "schema version or alias; defaults to replay metadata")
         String version;
 
         @Option(names = "--schema-file", description = "additional external schema JSON file", split = ",")
@@ -82,13 +83,28 @@ public final class WorldMirrorCli implements Callable<Integer> {
         @Option(names = "--dimension", defaultValue = "minecraft:overworld", description = "dimension key to attach recovered chunks to")
         String dimension;
 
-        @Option(names = "--registry-mappings", description = "source-derived registry mapping JSON; defaults to TEMP_REPLAY_MOD_EXT/generated_mappings/registries_26.1.2.json when present")
+        @Option(names = "--registry-mappings", description = "override bundled, version-matched registry mapping JSON")
         Path registryMappings;
 
         @Override
         public Integer call() throws Exception {
-            ProtocolSchema schema = SchemaRepository.loadBundled(schemaFiles).require(version);
-            RegistryMappings mappings = RegistryMappings.load(resolveRegistryMappings());
+            ReplayMetadata metadata = McprInputResolver.readMetadata(input);
+            if (metadata.fileFormatVersion() != 14) {
+                throw new CommandLine.ParameterException(new CommandLine(this),
+                        "unsupported ReplayMod file format " + metadata.fileFormatVersion() + "; expected 14");
+            }
+            if (version != null && !SchemaRepository.loadBundled(schemaFiles).require(version).minecraftVersion().equals(metadata.minecraftVersion())) {
+                throw new CommandLine.ParameterException(new CommandLine(this),
+                        "--version " + version + " conflicts with replay metadata " + metadata.minecraftVersion());
+            }
+            ProtocolSchema schema = SchemaRepository.loadBundled(schemaFiles).require(metadata.minecraftVersion(), metadata.protocol());
+            RegistryMappings mappings = registryMappings == null
+                    ? RegistryMappings.loadBundled(schema.minecraftVersion()) : RegistryMappings.load(registryMappings);
+            if (mappings.dataVersion() != schema.dataVersion()) {
+                throw new CommandLine.ParameterException(new CommandLine(this),
+                        "registry mapping DataVersion " + mappings.dataVersion() + " does not match " + schema.minecraftVersion()
+                                + " DataVersion " + schema.dataVersion());
+            }
             AnalysisWorldExporter exporter = new AnalysisWorldExporter(schema, mappings);
             try (ReplaySource source = McprInputResolver.open(input)) {
                 AnalysisWorldExporter.ExportSummary summary = exporter.export(source, out, new DimensionKey(dimension));
@@ -98,22 +114,6 @@ public final class WorldMirrorCli implements Callable<Integer> {
             return 0;
         }
 
-        private Path resolveRegistryMappings() {
-            if (registryMappings != null) {
-                return registryMappings;
-            }
-            List<Path> candidates = List.of(
-                    Path.of("TEMP_REPLAY_MOD_EXT", "generated_mappings", "registries_26.1.2.json"),
-                    Path.of("..", "TEMP_REPLAY_MOD_EXT", "generated_mappings", "registries_26.1.2.json"),
-                    Path.of("generated_mappings", "registries_26.1.2.json"));
-            for (Path candidate : candidates) {
-                if (candidate.toFile().isFile()) {
-                    return candidate.normalize();
-                }
-            }
-            throw new CommandLine.ParameterException(new CommandLine(this),
-                    "missing --registry-mappings; expected 26.1.2 mapping JSON");
-        }
     }
 
     @Command(name = "generate-registry-mappings", description = "Generate registry mapping JSON by running a small dumper against a named Minecraft jar.")
@@ -136,11 +136,17 @@ public final class WorldMirrorCli implements Callable<Integer> {
         @Option(names = "--java-home", description = "JDK used to compile/run the registry dumper; 26.1.2 requires Java 25")
         Path javaHome;
 
+        @Option(names = "--extra-jar", description = "additional jars needed by a Fabric-patched named Minecraft jar")
+        List<Path> extraJars = List.of();
+
+        @Option(names = "--fabric-classpath-file", description = "Gradle runtime classpath listing; adds Fabric API/loader jars for a patched named jar")
+        Path fabricClasspathFile;
+
         @Override
         public Integer call() throws Exception {
             RegistryMappingsGenerator generator = new RegistryMappingsGenerator();
             RegistryMappingsGenerator.Result result = generator.generate(new RegistryMappingsGenerator.Options(
-                    minecraftVersion, versionJson, clientJar, workDir, out, javaHome));
+                    minecraftVersion, versionJson, clientJar, workDir, out, javaHome, extraJars, fabricClasspathFile));
             ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
             System.out.println(mapper.writeValueAsString(result.asMap()));
             return 0;
@@ -154,6 +160,9 @@ public final class WorldMirrorCli implements Callable<Integer> {
 
         @Option(names = "--protocol-version", description = "protocol/source version label to place in the schema")
         String protocolVersion;
+
+        @Option(names = "--network-protocol", required = true, description = "numeric Minecraft network protocol from the target client")
+        int networkProtocol;
 
         @Option(names = "--data-version", required = true, description = "DataVersion to place in the schema; registry generation prints this value")
         int dataVersion;
@@ -180,7 +189,7 @@ public final class WorldMirrorCli implements Callable<Integer> {
         public Integer call() throws Exception {
             SchemaSkeletonGenerator generator = new SchemaSkeletonGenerator();
             SchemaSkeletonGenerator.Result result = generator.generate(new SchemaSkeletonGenerator.Options(
-                    minecraftVersion, protocolVersion, dataVersion, minSectionY, maxSectionY, versionJson, clientJar, workDir, out));
+                    minecraftVersion, protocolVersion, networkProtocol, dataVersion, minSectionY, maxSectionY, versionJson, clientJar, workDir, out));
             ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
             System.out.println(mapper.writeValueAsString(result.asMap()));
             return 0;

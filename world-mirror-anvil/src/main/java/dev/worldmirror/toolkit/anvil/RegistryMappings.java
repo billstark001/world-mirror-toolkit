@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.worldmirror.toolkit.core.ParseException;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.zip.GZIPInputStream;
 
-/** Source-derived 26.1.2 registry id mappings used to turn network palette ids into Anvil names. */
+/** Source-derived registry id mappings used to turn network palette ids into Anvil names. */
 public final class RegistryMappings {
     private final int dataVersion;
     private final Map<Integer, BlockState> blockStates;
@@ -21,7 +24,22 @@ public final class RegistryMappings {
     }
 
     public static RegistryMappings load(Path path) throws IOException {
-        JsonNode root = new ObjectMapper().readTree(path.toFile());
+        try (InputStream stream = Files.newInputStream(path)) {
+            return load(stream);
+        }
+    }
+
+    public static RegistryMappings loadBundled(String minecraftVersion) throws IOException {
+        String resource = "registries/registries_" + minecraftVersion + ".json.gz";
+        InputStream stream = RegistryMappings.class.getClassLoader().getResourceAsStream(resource);
+        if (stream == null) throw new ParseException("no bundled registry mappings for " + minecraftVersion);
+        try (InputStream inflated = new GZIPInputStream(stream)) {
+            return load(inflated);
+        }
+    }
+
+    private static RegistryMappings load(InputStream stream) throws IOException {
+        JsonNode root = new ObjectMapper().readTree(stream);
         Map<Integer, BlockState> blockStates = new LinkedHashMap<>();
         JsonNode states = root.path("block_states");
         states.fieldNames().forEachRemaining(key -> {
@@ -33,7 +51,8 @@ public final class RegistryMappings {
         Map<Integer, String> blockEntityTypes = new LinkedHashMap<>();
         JsonNode entityTypes = root.path("block_entity_types");
         entityTypes.fieldNames().forEachRemaining(key -> blockEntityTypes.put(Integer.parseInt(key), entityTypes.path(key).asText()));
-        return new RegistryMappings(root.path("data_version").asInt(4790), blockStates, blockEntityTypes);
+        if (!root.has("data_version")) throw new ParseException("registry mappings lack data_version");
+        return new RegistryMappings(root.path("data_version").asInt(), blockStates, blockEntityTypes);
     }
 
     public int dataVersion() {
@@ -41,7 +60,7 @@ public final class RegistryMappings {
     }
 
     public NbtValue.CompoundValue blockStateNbt(int globalId) {
-        BlockState state = blockStates.getOrDefault(globalId, BlockState.AIR);
+        BlockState state = requireBlockState(globalId);
         Map<String, NbtValue> out = new LinkedHashMap<>();
         out.put("Name", NbtValue.stringValue(state.name()));
         if (!state.properties().isEmpty()) {
@@ -53,11 +72,13 @@ public final class RegistryMappings {
     }
 
     public String blockStateName(int globalId) {
-        return blockStates.getOrDefault(globalId, BlockState.AIR).name();
+        return requireBlockState(globalId).name();
     }
 
     public String blockEntityType(int typeId) {
-        return blockEntityTypes.getOrDefault(typeId, "minecraft:chest");
+        String name = blockEntityTypes.get(typeId);
+        if (name == null) throw new ParseException("unknown block entity registry id " + typeId);
+        return name;
     }
 
     public void requireUsable() {
@@ -66,7 +87,12 @@ public final class RegistryMappings {
         }
     }
 
+    private BlockState requireBlockState(int id) {
+        BlockState state = blockStates.get(id);
+        if (state == null) throw new ParseException("unknown block state registry id " + id);
+        return state;
+    }
+
     private record BlockState(String name, Map<String, String> properties) {
-        private static final BlockState AIR = new BlockState("minecraft:air", Map.of());
     }
 }

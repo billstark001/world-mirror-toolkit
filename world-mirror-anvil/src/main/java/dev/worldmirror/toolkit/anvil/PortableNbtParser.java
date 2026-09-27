@@ -19,6 +19,16 @@ final class PortableNbtParser {
         return readPayload(cursor, rootType);
     }
 
+    NbtValue.CompoundValue parseDiskRoot(byte[] raw) {
+        ByteCursor cursor = new ByteCursor(raw);
+        NbtTagId type = NbtTagId.fromId(cursor.readUnsignedByte());
+        if (type != NbtTagId.COMPOUND) throw new ParseException("expected disk NBT compound root");
+        readClassicString(cursor); // root name
+        NbtValue value = readPayload(cursor, type);
+        if (cursor.hasRemaining()) throw new ParseException("trailing bytes after disk NBT root");
+        return (NbtValue.CompoundValue) value;
+    }
+
     private NbtValue readPayload(ByteCursor cursor, NbtTagId type) {
         return switch (type) {
             case BYTE -> NbtValue.byteValue(cursor.readByte());

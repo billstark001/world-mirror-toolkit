@@ -6,6 +6,7 @@ dependencies {
     implementation(libs.jacksonDatabind)
     implementation(libs.ensNbt)
     implementation(libs.ensNbtMca)
+    implementation(libs.sqliteJdbc)
     testImplementation(platform(libs.junitBom))
     testImplementation(libs.junitJupiter)
 }

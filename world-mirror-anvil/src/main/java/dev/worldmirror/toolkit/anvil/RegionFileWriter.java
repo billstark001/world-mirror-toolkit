@@ -46,10 +46,11 @@ public final class RegionFileWriter {
                 locations[tableIndex + 1] = (byte) ((sectorCursor >>> 8) & 0xFF);
                 locations[tableIndex + 2] = (byte) (sectorCursor & 0xFF);
                 locations[tableIndex + 3] = (byte) sectorCount;
-                timestamps[tableIndex] = (byte) ((now >>> 24) & 0xFF);
-                timestamps[tableIndex + 1] = (byte) ((now >>> 16) & 0xFF);
-                timestamps[tableIndex + 2] = (byte) ((now >>> 8) & 0xFF);
-                timestamps[tableIndex + 3] = (byte) (now & 0xFF);
+                int timestamp = captureSeconds(entry.getValue(), now);
+                timestamps[tableIndex] = (byte) ((timestamp >>> 24) & 0xFF);
+                timestamps[tableIndex + 1] = (byte) ((timestamp >>> 16) & 0xFF);
+                timestamps[tableIndex + 2] = (byte) ((timestamp >>> 8) & 0xFF);
+                timestamps[tableIndex + 3] = (byte) (timestamp & 0xFF);
 
                 out.seek((long) sectorCursor * SECTOR_BYTES);
                 out.writeInt(payloadLength);
@@ -65,6 +66,16 @@ public final class RegionFileWriter {
             out.write(locations);
             out.write(timestamps);
         }
+    }
+
+    private int captureSeconds(NbtValue.CompoundValue chunk, int fallback) {
+        NbtValue replay = chunk.values().get("ReplayRecovered");
+        if (replay instanceof NbtValue.CompoundValue data
+                && data.values().get("CaptureTimestampMillis") instanceof NbtValue.LongValue time
+                && time.value() > 0) {
+            return (int) (time.value() / 1000);
+        }
+        return fallback;
     }
 
     private byte[] zlib(byte[] input) throws IOException {

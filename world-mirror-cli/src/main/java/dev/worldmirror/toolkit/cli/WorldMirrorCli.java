@@ -3,9 +3,11 @@ package dev.worldmirror.toolkit.cli;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import dev.worldmirror.toolkit.anvil.AnalysisWorldExporter;
+import dev.worldmirror.toolkit.anvil.ChunkImporter;
 import dev.worldmirror.toolkit.anvil.QuerzNbtBridge;
 import dev.worldmirror.toolkit.anvil.RegistryMappings;
 import dev.worldmirror.toolkit.core.DimensionKey;
+import dev.worldmirror.toolkit.core.WorldLayout;
 import dev.worldmirror.toolkit.replay.McprInputResolver;
 import dev.worldmirror.toolkit.replay.ReplayIndexWriter;
 import dev.worldmirror.toolkit.replay.ReplaySource;
@@ -31,6 +33,7 @@ import picocli.CommandLine.Option;
         subcommands = {
             WorldMirrorCli.IndexCommand.class,
             WorldMirrorCli.ExportAnalysisCommand.class,
+            WorldMirrorCli.ImportChunksCommand.class,
             WorldMirrorCli.GenerateRegistryMappingsCommand.class,
             WorldMirrorCli.GenerateSchemaCommand.class,
             WorldMirrorCli.SchemasCommand.class,
@@ -68,8 +71,9 @@ public final class WorldMirrorCli implements Callable<Integer> {
 
     @Command(name = "export-analysis", description = "Build analysis-mode Anvil .mca files from replay chunk packets.")
     static final class ExportAnalysisCommand implements Callable<Integer> {
-        @Option(names = {"-i", "--input"}, required = true, description = "recording.tmcpr, unpacked .mcpr directory, or .mcpr zip")
-        Path input;
+        @Option(names = {"-i", "--input"}, required = true, arity = "1..*",
+                description = "one or more .mcpr files, a folder of .mcpr files, or an unpacked replay")
+        List<Path> inputs;
 
         @Option(names = {"-o", "--out"}, required = true, description = "output world/dimension directory")
         Path out;
@@ -86,9 +90,16 @@ public final class WorldMirrorCli implements Callable<Integer> {
         @Option(names = "--registry-mappings", description = "override bundled, version-matched registry mapping JSON")
         Path registryMappings;
 
+        @Option(names = "--layout", defaultValue = "auto", description = "auto, legacy, or namespaced")
+        String layout;
+
+        @Option(names = "--world", defaultValue = "all", description = "all, longest, or a world id from a previous scan")
+        String world;
+
         @Override
         public Integer call() throws Exception {
-            ReplayMetadata metadata = McprInputResolver.readMetadata(input);
+            List<Path> replayInputs = McprInputResolver.resolveInputs(inputs);
+            ReplayMetadata metadata = McprInputResolver.readMetadata(replayInputs.getFirst());
             if (metadata.fileFormatVersion() != 14) {
                 throw new CommandLine.ParameterException(new CommandLine(this),
                         "unsupported ReplayMod file format " + metadata.fileFormatVersion() + "; expected 14");
@@ -106,14 +117,72 @@ public final class WorldMirrorCli implements Callable<Integer> {
                                 + " DataVersion " + schema.dataVersion());
             }
             AnalysisWorldExporter exporter = new AnalysisWorldExporter(schema, mappings);
-            try (ReplaySource source = McprInputResolver.open(input)) {
-                AnalysisWorldExporter.ExportSummary summary = exporter.export(source, out, new DimensionKey(dimension));
-                ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
-                System.out.println(mapper.writeValueAsString(summary.asMap()));
-            }
+            AnalysisWorldExporter.ExportSummary summary = exporter.export(replayInputs, out,
+                    new DimensionKey(dimension), WorldLayout.parse(layout, schema.minecraftVersion()), world);
+            ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+            System.out.println(mapper.writeValueAsString(summary.asMap()));
             return 0;
         }
 
+    }
+
+    @Command(name = "import-chunks", description = "Import analysis chunks into an existing save.")
+    static final class ImportChunksCommand implements Callable<Integer> {
+        @Option(names = "--src", required = true, description = "one exported world root")
+        Path source;
+
+        @Option(names = "--dst", required = true, description = "existing destination save root")
+        Path destination;
+
+        @Option(names = "--mode", defaultValue = "default", description = "default or mirror")
+        String mode;
+
+        @Option(names = "--policy", defaultValue = "auto", description = "auto, empty-only, or timestamp")
+        String policy;
+
+        @Option(names = "--destination-layout", defaultValue = "auto",
+                description = "auto, legacy, or namespaced")
+        String destinationLayout;
+
+        @Option(names = "--allow-source-mismatch", description = "permit a replay source different from mirror sourceId")
+        boolean allowSourceMismatch;
+
+        @Option(names = "--dry-run", description = "plan changes without modifying the destination")
+        boolean dryRun;
+
+        @Option(names = "--yes", description = "accept a source/destination version mismatch")
+        boolean yes;
+
+        @Override
+        public Integer call() throws Exception {
+            ChunkImporter.Mode selectedMode = switch (mode.toLowerCase(java.util.Locale.ROOT)) {
+                case "default" -> ChunkImporter.Mode.DEFAULT;
+                case "mirror" -> ChunkImporter.Mode.MIRROR;
+                default -> throw new CommandLine.ParameterException(new CommandLine(this), "unknown mode: " + mode);
+            };
+            ChunkImporter.Policy selectedPolicy = switch (policy.toLowerCase(java.util.Locale.ROOT)) {
+                case "auto" -> selectedMode == ChunkImporter.Mode.MIRROR
+                        ? ChunkImporter.Policy.TIMESTAMP : ChunkImporter.Policy.EMPTY_ONLY;
+                case "empty-only" -> ChunkImporter.Policy.EMPTY_ONLY;
+                case "timestamp" -> ChunkImporter.Policy.TIMESTAMP;
+                default -> throw new CommandLine.ParameterException(new CommandLine(this), "unknown policy: " + policy);
+            };
+            ChunkImporter importer = new ChunkImporter();
+            var plan = importer.plan(new ChunkImporter.Options(source, destination, selectedMode,
+                    selectedPolicy, destinationLayout, allowSourceMismatch));
+            ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+            System.out.println(mapper.writeValueAsString(plan.asMap()));
+            if (dryRun) return 0;
+            if (plan.versionMismatch() && !yes) {
+                System.out.print("Minecraft/DataVersion differs; import chunks anyway? [y/N] ");
+                System.out.flush();
+                int answer = System.in.read();
+                if (answer != 'y' && answer != 'Y') return 2;
+            }
+            Path backup = importer.execute(plan);
+            System.out.println("import complete; backup=" + (backup == null ? "none (no changes)" : backup));
+            return 0;
+        }
     }
 
     @Command(name = "generate-registry-mappings", description = "Generate registry mapping JSON by running a small dumper against a named Minecraft jar.")

@@ -8,6 +8,9 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -40,8 +43,32 @@ public final class McprInputResolver {
             if (version.isBlank() || protocol < 0 || format < 0) {
                 throw new ToolkitException("replay metadata lacks mcversion, protocol, or fileFormatVersion");
             }
-            return new ReplayMetadata(version, protocol, format);
+            return new ReplayMetadata(version, protocol, format,
+                    node.path("date").asLong(0), node.path("duration").asLong(0),
+                    node.path("serverName").asText("unknown"), node.path("singleplayer").asBoolean(false));
         }
+    }
+
+    /** Expands recording folders but keeps an unpacked ReplayMod directory as one input. */
+    public static List<Path> resolveInputs(List<Path> inputs) throws IOException {
+        List<Path> resolved = new ArrayList<>();
+        for (Path input : inputs) {
+            if (Files.isDirectory(input) && !Files.isRegularFile(input.resolve("recording.tmcpr"))) {
+                try (var children = Files.list(input)) {
+                    resolved.addAll(children.filter(Files::isRegularFile)
+                            .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".mcpr"))
+                            .toList());
+                }
+            } else {
+                resolved.add(input);
+            }
+        }
+        if (resolved.isEmpty()) throw new ToolkitException("no ReplayMod files found in inputs");
+        resolved.sort(Comparator.comparingLong((Path path) -> {
+            try { return readMetadata(path).startTimeMillis(); }
+            catch (IOException failure) { throw new ToolkitException("cannot read replay metadata: " + path, failure); }
+        }).thenComparing(Path::toString));
+        return List.copyOf(resolved);
     }
 
     public static ReplaySource open(Path input) throws IOException {

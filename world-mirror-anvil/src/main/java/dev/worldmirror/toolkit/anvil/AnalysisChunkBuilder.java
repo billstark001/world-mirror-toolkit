@@ -31,6 +31,11 @@ public final class AnalysisChunkBuilder {
 
     public Optional<NbtValue.CompoundValue> build(DecodedChunkPacket packet, int packetCountForChunk,
             Map<Integer, String> biomes, int minSectionY) {
+        return build(packet, packetCountForChunk, biomes, minSectionY, packet.timestampMillis(), "unknown");
+    }
+
+    public Optional<NbtValue.CompoundValue> build(DecodedChunkPacket packet, int packetCountForChunk,
+            Map<Integer, String> biomes, int minSectionY, long captureTimeMillis, String replayFile) {
         ChunkSectionDecoder.DecodeResult sectionResult = sectionDecoder.decode(packet.rawChunkData(), mappings, minSectionY, biomes);
         LightDataDecoder.DecodeResult lightResult = lightDecoder.decode(packet.rawLightData(), minSectionY - 1);
         List<NbtValue.CompoundValue> sections = new ArrayList<>();
@@ -66,6 +71,8 @@ public final class AnalysisChunkBuilder {
         replay.put("Dimension", NbtValue.stringValue(packet.dimension().value()));
         replay.put("LatestReplayEvent", NbtValue.longValue(packet.eventIndex()));
         replay.put("LatestTimestampMillis", NbtValue.longValue(packet.timestampMillis()));
+        replay.put("CaptureTimestampMillis", NbtValue.longValue(captureTimeMillis));
+        replay.put("SourceReplay", NbtValue.stringValue(replayFile));
         replay.put("ChunkPacketCount", NbtValue.intValue(packetCountForChunk));
         replay.put("BlockEntityCountInPacket", NbtValue.intValue(packet.blockEntities().size()));
         replay.put("RawLevelChunkData", NbtValue.byteArray(packet.rawChunkData()));

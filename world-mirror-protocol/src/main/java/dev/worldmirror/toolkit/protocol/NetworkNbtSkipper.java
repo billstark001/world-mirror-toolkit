@@ -2,6 +2,8 @@ package dev.worldmirror.toolkit.protocol;
 
 import dev.worldmirror.toolkit.core.ByteCursor;
 import dev.worldmirror.toolkit.core.ParseException;
+import java.nio.charset.StandardCharsets;
+import java.util.OptionalInt;
 
 /**
  * Minimal network-NBT skipper for packet field alignment.
@@ -21,6 +23,26 @@ public final class NetworkNbtSkipper {
             return;
         }
         skipPayload(cursor, rootType, 0);
+    }
+
+    /** Reads one integer field while advancing past an unnamed network compound. */
+    public OptionalInt readRootInt(ByteCursor cursor, String field) {
+        int rootType = cursor.readUnsignedByte();
+        if (rootType != 10) {
+            throw new ParseException("expected NBT compound root, got " + rootType);
+        }
+        OptionalInt result = OptionalInt.empty();
+        while (true) {
+            int child = cursor.readUnsignedByte();
+            if (child == 0) return result;
+            int length = cursor.readUnsignedShort();
+            String name = new String(cursor.readBytes(length), StandardCharsets.UTF_8);
+            if (child == 3 && field.equals(name)) {
+                result = OptionalInt.of(cursor.readInt());
+            } else {
+                skipPayload(cursor, child, 1);
+            }
+        }
     }
 
     private void skipPayload(ByteCursor cursor, int tagType, int depth) {

@@ -1,5 +1,7 @@
 package dev.worldmirror.toolkit.replay;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.worldmirror.toolkit.core.ToolkitException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,6 +14,35 @@ import java.util.zip.ZipFile;
 /** Opens {@code recording.tmcpr} from a raw file, an unpacked ReplayMod directory, or an .mcpr zip. */
 public final class McprInputResolver {
     private McprInputResolver() {}
+
+    public static ReplayMetadata readMetadata(Path input) throws IOException {
+        String fileName = input.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (Files.isDirectory(input)) {
+            return readMetadataJson(Files.newInputStream(input.resolve("metaData.json")));
+        }
+        if (fileName.endsWith(".mcpr") || fileName.endsWith(".zip")) {
+            try (ZipFile zip = new ZipFile(input.toFile())) {
+                ZipEntry entry = zip.getEntry("metaData.json");
+                if (entry == null) throw new ToolkitException("replay has no metaData.json: " + input);
+                return readMetadataJson(zip.getInputStream(entry));
+            }
+        }
+        Path metadata = input.resolveSibling("metaData.json");
+        return readMetadataJson(Files.newInputStream(metadata));
+    }
+
+    private static ReplayMetadata readMetadataJson(InputStream stream) throws IOException {
+        try (stream) {
+            JsonNode node = new ObjectMapper().readTree(stream);
+            String version = node.path("mcversion").asText();
+            int protocol = node.path("protocol").asInt(-1);
+            int format = node.path("fileFormatVersion").asInt(-1);
+            if (version.isBlank() || protocol < 0 || format < 0) {
+                throw new ToolkitException("replay metadata lacks mcversion, protocol, or fileFormatVersion");
+            }
+            return new ReplayMetadata(version, protocol, format);
+        }
+    }
 
     public static ReplaySource open(Path input) throws IOException {
         if (Files.isDirectory(input)) {

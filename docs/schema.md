@@ -7,8 +7,9 @@ The toolkit never treats a raw packet ID as globally meaningful. A schema maps p
 ```json
 {
   "schemaVersion": "0.1",
-  "minecraftVersion": "1.21.7",
+  "minecraftVersion": "26.1.2",
   "protocolVersion": "26.1.2",
+  "networkProtocol": 775,
   "dataVersion": 4790,
   "minSectionY": -4,
   "maxSectionY": 19,
@@ -30,9 +31,10 @@ The toolkit never treats a raw packet ID as globally meaningful. A schema maps p
 ## Important fields
 
 - `minecraftVersion`: user-facing version selector.
-- `protocolVersion`: optional protocol/source version label. It may be a Mojang protocol number, a ReplayMod-era label, or a project-specific alias.
+- `protocolVersion`: human-readable protocol/source version label.
+- `networkProtocol`: numeric Minecraft network protocol, checked against ReplayMod metadata.
 - `dataVersion`: Anvil `DataVersion` to write into chunks.
-- `minSectionY` / `maxSectionY`: world height range, used by future palette conversion.
+- `minSectionY` / `maxSectionY`: overworld height range and fallback when a replay has no dimension-type registry. For each login/respawn, the exporter uses the selected dimension type's `min_y` instead; vanilla registry entries without inline data use their known heights.
 - `packets[].id`: numeric packet ID in that protocol state and direction.
 - `packets[].kind`: stable semantic kind used by the toolkit.
 - `packets[].parser`: exact decoder implementation to invoke.
@@ -45,9 +47,9 @@ Implemented now:
 
 Reserved / raw now:
 
-- `raw-registry-data/v1`
-- `raw-login/v1`
-- `raw-respawn/v1`
+- `raw-registry-data/v1`: captures dynamic biome names and dimension-type minimum Y values.
+- `raw-login/v1` and `raw-respawn/v1`: track world hashed seed, dimension, and dimension type.
+- `state-transition`: switches between configuration and play classification.
 
 When a Minecraft version changes only packet IDs, add a new schema file. When it changes packet layout, add a new parser id and implementation.
 
@@ -56,9 +58,9 @@ When a Minecraft version changes only packet IDs, add a new schema file. When it
 1. Capture one small ReplayMod recording on the target version.
 2. Use `index` to inspect packet ID frequencies.
 3. Confirm packet IDs from client protocol registration code, then confirm packet layouts from packet classes and their stream codecs.
-4. Copy `schemas/template-1.20.1.json` and fill in real packet IDs.
+4. Copy `schemas/template-1.20.1.json`, fill in numeric protocol, DataVersion, and real packet IDs, then generate a matching registry mapping.
 5. Add a golden sample test that decodes at least one chunk packet.
-6. Only mark `confidence` as `confirmed-*` once a sample has been decoded and written.
+6. Record separately whether a real replay has been decoded and written; bytecode verification alone does not establish an end-to-end export.
 
 ## What schema generation can and cannot infer
 

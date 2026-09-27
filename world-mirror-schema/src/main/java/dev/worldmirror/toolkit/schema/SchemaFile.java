@@ -7,6 +7,7 @@ final class SchemaFile {
     public String schemaVersion;
     public String minecraftVersion;
     public String protocolVersion;
+    public int networkProtocol;
     public int dataVersion;
     public int minSectionY = -4;
     public int maxSectionY = 19;
@@ -18,6 +19,7 @@ final class SchemaFile {
                 schemaVersion,
                 minecraftVersion,
                 protocolVersion,
+                networkProtocol,
                 dataVersion,
                 minSectionY,
                 maxSectionY,

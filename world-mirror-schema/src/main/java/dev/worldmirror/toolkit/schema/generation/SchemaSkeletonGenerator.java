@@ -25,6 +25,7 @@ public final class SchemaSkeletonGenerator {
         schema.put("protocolVersion", options.protocolVersion() == null || options.protocolVersion().isBlank()
                 ? version.path("id").asText(options.minecraftVersion())
                 : options.protocolVersion());
+        schema.put("networkProtocol", options.networkProtocol());
         schema.put("dataVersion", options.dataVersion());
         schema.put("minSectionY", options.minSectionY());
         schema.put("maxSectionY", options.maxSectionY());
@@ -35,7 +36,7 @@ public final class SchemaSkeletonGenerator {
         return new Result(options.out(), (String) schema.get("minecraftVersion"), (String) schema.get("protocolVersion"), options.dataVersion());
     }
 
-    public record Options(String minecraftVersion, String protocolVersion, int dataVersion, int minSectionY, int maxSectionY, Path versionJson, Path clientJar, Path workDir, Path out) {}
+    public record Options(String minecraftVersion, String protocolVersion, int networkProtocol, int dataVersion, int minSectionY, int maxSectionY, Path versionJson, Path clientJar, Path workDir, Path out) {}
 
     public record Result(Path out, String minecraftVersion, String protocolVersion, int dataVersion) {
         public Map<String, Object> asMap() {

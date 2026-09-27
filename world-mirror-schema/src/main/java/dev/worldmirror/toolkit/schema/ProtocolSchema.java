@@ -10,6 +10,7 @@ public final class ProtocolSchema {
     private final String schemaVersion;
     private final String minecraftVersion;
     private final String protocolVersion;
+    private final int networkProtocol;
     private final int dataVersion;
     private final int minSectionY;
     private final int maxSectionY;
@@ -20,6 +21,7 @@ public final class ProtocolSchema {
             String schemaVersion,
             String minecraftVersion,
             String protocolVersion,
+            int networkProtocol,
             int dataVersion,
             int minSectionY,
             int maxSectionY,
@@ -28,6 +30,7 @@ public final class ProtocolSchema {
         this.schemaVersion = Objects.requireNonNull(schemaVersion, "schemaVersion");
         this.minecraftVersion = Objects.requireNonNull(minecraftVersion, "minecraftVersion");
         this.protocolVersion = Objects.requireNonNull(protocolVersion, "protocolVersion");
+        this.networkProtocol = networkProtocol;
         this.dataVersion = dataVersion;
         this.minSectionY = minSectionY;
         this.maxSectionY = maxSectionY;
@@ -38,6 +41,7 @@ public final class ProtocolSchema {
     public String schemaVersion() { return schemaVersion; }
     public String minecraftVersion() { return minecraftVersion; }
     public String protocolVersion() { return protocolVersion; }
+    public int networkProtocol() { return networkProtocol; }
     public int dataVersion() { return dataVersion; }
     public int minSectionY() { return minSectionY; }
     public int maxSectionY() { return maxSectionY; }
@@ -48,8 +52,8 @@ public final class ProtocolSchema {
         return minecraftVersion.equals(requested) || protocolVersion.equals(requested) || aliases.contains(requested);
     }
 
-    public Optional<PacketDescriptor> findByPacketId(int id) {
-        return packets.stream().filter(p -> p.id() == id).findFirst();
+    public Optional<PacketDescriptor> findByPacketId(PacketState state, int id) {
+        return packets.stream().filter(p -> p.state() == state && p.id() == id && "clientbound".equals(p.direction())).findFirst();
     }
 
     public List<PacketDescriptor> findByKind(PacketKind kind) {

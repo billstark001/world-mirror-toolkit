@@ -9,9 +9,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Generates replay export registry mappings by running a tiny dumper against a named Minecraft jar. */
 public final class RegistryMappingsGenerator {
@@ -19,25 +21,38 @@ public final class RegistryMappingsGenerator {
     private final MojangVersionAssets assets = new MojangVersionAssets();
 
     public Result generate(Options options) throws IOException, InterruptedException {
+        Path workDir = options.workDir().toAbsolutePath().normalize();
+        Path output = options.out().toAbsolutePath().normalize();
         MojangVersionAssets.PreparedAssets prepared = assets.prepare(new MojangVersionAssets.Options(
-                options.minecraftVersion(), options.versionJson(), options.clientJar(), options.workDir()));
-        Files.createDirectories(options.workDir());
-        Files.createDirectories(options.out().getParent());
+                options.minecraftVersion(), options.versionJson(), options.clientJar(), workDir));
+        Files.createDirectories(workDir);
+        Files.createDirectories(output.getParent());
         List<Path> classpath = new ArrayList<>();
         classpath.add(prepared.clientJar());
         classpath.addAll(prepared.libraries());
+        classpath.addAll(options.extraJars() == null ? List.of() : options.extraJars());
+        if (options.fabricClasspathFile() != null) {
+            Set<String> names = new HashSet<>();
+            classpath.forEach(path -> names.add(path.getFileName().toString()));
+            for (String line : Files.readAllLines(options.fabricClasspathFile())) {
+                String entry = line.trim();
+                if (!entry.endsWith(".jar") || !(entry.contains("net.fabricmc.fabric-api") || entry.contains("fabric-loader"))) continue;
+                Path jar = Path.of(entry);
+                if (Files.isRegularFile(jar) && names.add(jar.getFileName().toString())) classpath.add(jar);
+            }
+        }
 
         ToolkitException lastFailure = null;
         for (DumperSource source : DumperSource.variants()) {
             try {
-                Path sourcePath = options.workDir().resolve("DumpRegistryMappings.java");
+                Path sourcePath = workDir.resolve("DumpRegistryMappings.java");
                 Files.writeString(sourcePath, source.source(), StandardCharsets.UTF_8);
-                run(List.of(javaTool(options.javaHome(), "javac"), "-encoding", "UTF-8", "-cp", classpath(classpath), sourcePath.toString()), options.workDir());
-                ProcessResult result = run(List.of(javaTool(options.javaHome(), "java"), "-cp", classpath(append(classpath, options.workDir())), "DumpRegistryMappings"), options.workDir());
+                run(List.of(javaTool(options.javaHome(), "javac"), "-encoding", "UTF-8", "-cp", classpath(classpath), sourcePath.toString()), workDir);
+                ProcessResult result = run(List.of(javaTool(options.javaHome(), "java"), "-cp", classpath(append(classpath, workDir)), "DumpRegistryMappings"), workDir);
                 JsonNode generated = parseGeneratedJson(result.stdout());
-                mapper.writeValue(options.out().toFile(), generated);
+                mapper.writeValue(output.toFile(), generated);
                 return new Result(
-                        options.out(),
+                        output,
                         prepared.versionId(),
                         generated.path("data_version").asInt(),
                         generated.path("block_states").size(),
@@ -101,7 +116,8 @@ public final class RegistryMappingsGenerator {
         return javaHome.resolve("bin").resolve(file).toString();
     }
 
-    public record Options(String minecraftVersion, Path versionJson, Path clientJar, Path workDir, Path out, Path javaHome) {}
+    public record Options(String minecraftVersion, Path versionJson, Path clientJar, Path workDir, Path out, Path javaHome,
+            List<Path> extraJars, Path fabricClasspathFile) {}
 
     public record Result(Path out, String versionId, int dataVersion, int blockStates, int blockEntityTypes, int biomes, String dumperVariant) {
         public Map<String, Object> asMap() {

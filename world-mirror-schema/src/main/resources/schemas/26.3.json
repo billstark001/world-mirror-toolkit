@@ -1,12 +1,14 @@
 {
   "schemaVersion": "0.1",
-  "minecraftVersion": "26.1.2",
-  "protocolVersion": "26.1.2",
-  "networkProtocol": 775,
-  "dataVersion": 4790,
+  "minecraftVersion": "26.3",
+  "protocolVersion": "26.3",
+  "networkProtocol": 777,
+  "dataVersion": 5023,
   "minSectionY": -4,
   "maxSectionY": 19,
-  "aliases": ["26.1.2", "mc-26.1.2"],
+  "aliases": [
+    "mc-26.3"
+  ],
   "packets": [
     {
       "state": "configuration",
@@ -24,16 +26,16 @@
       "name": "minecraft:registry_data",
       "kind": "REGISTRY_DATA",
       "parser": "raw-registry-data/v1",
-      "confidence": "confirmed-by-original-tooling"
+      "confidence": "verified-from-client-bytecode"
     },
     {
       "state": "play",
       "direction": "clientbound",
-      "id": 45,
+      "id": 46,
       "name": "minecraft:level_chunk_with_light",
       "kind": "LEVEL_CHUNK_WITH_LIGHT",
       "parser": "level-chunk-with-light/v1",
-      "confidence": "confirmed-by-original-tooling"
+      "confidence": "verified-from-client-bytecode"
     },
     {
       "state": "play",
@@ -47,7 +49,7 @@
     {
       "state": "play",
       "direction": "clientbound",
-      "id": 49,
+      "id": 50,
       "name": "minecraft:login",
       "kind": "LOGIN",
       "parser": "raw-login/v1",
@@ -56,7 +58,7 @@
     {
       "state": "play",
       "direction": "clientbound",
-      "id": 82,
+      "id": 84,
       "name": "minecraft:respawn",
       "kind": "RESPAWN",
       "parser": "raw-respawn/v1",
@@ -65,7 +67,7 @@
     {
       "state": "play",
       "direction": "clientbound",
-      "id": 118,
+      "id": 120,
       "name": "minecraft:start_configuration",
       "kind": "START_CONFIGURATION",
       "parser": "state-transition",

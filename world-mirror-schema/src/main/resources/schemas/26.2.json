@@ -1,12 +1,24 @@
 {
   "schemaVersion": "0.1",
-  "minecraftVersion": "1.21.7",
-  "protocolVersion": "26.1.2",
-  "dataVersion": 4790,
+  "minecraftVersion": "26.2",
+  "protocolVersion": "26.2",
+  "networkProtocol": 776,
+  "dataVersion": 4903,
   "minSectionY": -4,
   "maxSectionY": 19,
-  "aliases": ["26.1.2", "mc-26.1.2"],
+  "aliases": [
+    "mc-26.2"
+  ],
   "packets": [
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 3,
+      "name": "minecraft:finish_configuration",
+      "kind": "FINISH_CONFIGURATION",
+      "parser": "state-transition",
+      "confidence": "verified-from-client-bytecode"
+    },
     {
       "state": "configuration",
       "direction": "clientbound",
@@ -14,7 +26,7 @@
       "name": "minecraft:registry_data",
       "kind": "REGISTRY_DATA",
       "parser": "raw-registry-data/v1",
-      "confidence": "confirmed-by-original-tooling"
+      "confidence": "verified-from-client-bytecode"
     },
     {
       "state": "play",
@@ -23,16 +35,16 @@
       "name": "minecraft:level_chunk_with_light",
       "kind": "LEVEL_CHUNK_WITH_LIGHT",
       "parser": "level-chunk-with-light/v1",
-      "confidence": "confirmed-by-original-tooling"
+      "confidence": "verified-from-client-bytecode"
     },
     {
       "state": "play",
       "direction": "clientbound",
-      "id": 7,
+      "id": 6,
       "name": "minecraft:block_entity_data",
       "kind": "BLOCK_ENTITY_DATA",
       "parser": "raw-nbt-network/v1",
-      "confidence": "legacy-overlap"
+      "confidence": "verified-from-client-bytecode"
     },
     {
       "state": "play",
@@ -41,7 +53,7 @@
       "name": "minecraft:login",
       "kind": "LOGIN",
       "parser": "raw-login/v1",
-      "confidence": "legacy"
+      "confidence": "verified-from-client-bytecode"
     },
     {
       "state": "play",
@@ -50,7 +62,16 @@
       "name": "minecraft:respawn",
       "kind": "RESPAWN",
       "parser": "raw-respawn/v1",
-      "confidence": "legacy"
+      "confidence": "verified-from-client-bytecode"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 118,
+      "name": "minecraft:start_configuration",
+      "kind": "START_CONFIGURATION",
+      "parser": "state-transition",
+      "confidence": "verified-from-client-bytecode"
     }
   ]
 }

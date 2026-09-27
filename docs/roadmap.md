@@ -31,7 +31,7 @@ Status: world identity, dimension, and dimension-type height tracking are verifi
 
 ## Phase 4: playable save output
 
-- Generate `level.dat`.
+- Expand the minimal versioned `level.dat` into a complete playable save.
 - Generate entities and POI regions when data is available.
 - Add explicit `analysis` vs `playable` modes.
 - Provide a data-fixer boundary: this toolkit should not start Minecraft, but it can optionally prepare resources for an external fixer pipeline.

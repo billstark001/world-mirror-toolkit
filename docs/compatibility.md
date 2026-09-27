@@ -1,11 +1,11 @@
 # Replay compatibility matrix
 
-The matrix describes the `export-analysis` command. All listed versions use ReplayMod file format 14 and the clientbound configuration/play packet stream. The CLI reads `mcversion` and numeric `protocol` from `metaData.json`; an explicit `--version` must agree. A matching bundled block-state mapping is required.
+The matrix describes the `export-analysis` command. All listed versions use ReplayMod file format 14 and the clientbound configuration/play packet stream. The CLI reads `mcversion` and numeric `protocol` from `metaData.json`; an explicit `--version` must agree. A matching bundled block-state mapping is required. Mixed-version batches are rejected.
 
 | Minecraft | Protocol | DataVersion | Chunk / login / respawn packet IDs | Block states | Verification |
 | --- | ---: | ---: | --- | ---: | --- |
 | 26.1.2 | 775 | 4790 | 45 / 49 / 82 | 29,873 | Full local replay exported: 237,240 events, 8,339 chunks, 23 region files, 22 biome names, no decode warnings. |
-| 26.2 | 776 | 4903 | 45 / 49 / 82 | 32,366 | Full supplied replay exported: 1,415,828 events, 6,915 chunks across two worlds, 20 region files, 22 biome names, no decode warnings. |
+| 26.2 | 776 | 4903 | 45 / 49 / 82 | 32,366 | Nine supplied replays scanned: 33,105,533 events; longest world exported to 22,221 chunks in 48 regions and imported into a 26.2 mirror. Earlier single-replay validation found 22 biome names and no decode warnings. |
 | 26.3 | 777 | 5023 | 46 / 50 / 84 | 35,723 | Packet registration and layouts inspected in the 26.3 named client jar; mappings generated from that jar. No 26.3 replay was available for an end-to-end export. |
 
 The configuration registry-data packet is ID 7, and finish-configuration is ID 3 in these schemas. The play-state block-entity-data packet is ID 6; start-configuration is ID 118 in 26.1.2/26.2 and ID 120 in 26.3. Classification always includes the protocol state, since IDs are reused across states.
@@ -18,11 +18,14 @@ The configuration registry-data packet is ID 7, and finish-configuration is ID 3
 | Configuration/play transitions and biome registry | Verified | Verified | Decoder present; no sample |
 | Full chunk packets, block states, light, block entities | Verified | Verified | Decoder present; no sample |
 | Login/respawn dimension changes | Verified | Verified | Decoder present; no sample |
-| Incremental block/entity updates, heightmaps, entities, POI, `level.dat` | Unimplemented | Unimplemented | Unimplemented |
+| Minimal versioned `level.dat`, analysis manifest, and chunk import | Implemented; no end-to-end sample | Verified on 22,221 chunks | Implemented; no end-to-end sample |
+| Incremental block/entity updates, heightmaps, entities, POI | Unimplemented | Unimplemented | Unimplemented |
 
 Minecraft 1.21.11 and the `1.20.1` schema template are not bundled as supported replay targets. An external schema alone is insufficient when the packet layout or registry mapping differs.
 
 The 26.2 validation used the supplied recording locally. The replay and generated worlds are kept outside version control. Two different login hashed seeds identify two worlds. The larger has 4,137 overworld and 2,263 Nether chunks; the smaller has 515 overworld chunks. Previous dimension-only merging had combined 478 coordinate collisions into one output and produced visible seams. The Nether dimension type starts at section Y=0, while the overworld starts at section Y=-4. The old export applied -4 to both and shifted the Nether down 64 blocks. All 6,915 output chunks were independently checked for DataVersion, dimension-specific `yPos` and section Y bounds, and absence of `ReplayRecovered.Warnings`.
+
+The later nine-replay batch included recordings from another server. Source server and login hashed seed separate them. Accumulated play duration selected the intended world (60,529,628 ms) over its second same-server identity (4,574,140 ms) and the unrelated server (41,811,859 ms). The 22,221 imported MCA payloads matched the export byte for byte, and the mirror SQLite index contained the same number of dimension-scoped rows. This verifies file transfer and index accounting; loading the resulting save in Minecraft remains a separate in-game check.
 
 ## Regenerating block mappings
 

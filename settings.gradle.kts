@@ -9,6 +9,15 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         mavenCentral()
+        ivy {
+            name = "worldMirrorFormatReleases"
+            url = uri("https://github.com/billstark001/world-mirror/releases/download")
+            patternLayout {
+                artifact("world-mirror-format-v[revision]/[artifact]-[revision](-[classifier]).[ext]")
+            }
+            metadataSources { artifact() }
+            content { includeGroup("io.github.billstark001.worldmirror") }
+        }
     }
 }
 

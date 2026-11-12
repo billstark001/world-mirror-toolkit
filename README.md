@@ -9,7 +9,7 @@ See [the compatibility matrix](docs/compatibility.md) for verified versions and 
 ## Build and run
 
 ```powershell
-gradle :world-mirror-cli:installDist
+gradle --include-build ../world-mirror/world-mirror-format :world-mirror-cli:installDist
 .\world-mirror-cli\build\install\world-mirror-cli\bin\world-mirror-cli.bat schemas
 .\world-mirror-cli\build\install\world-mirror-cli\bin\world-mirror-cli.bat export-analysis -i D:\path\to\replays -o D:\path\to\analysis-world --world longest
 .\world-mirror-cli\build\install\world-mirror-cli\bin\world-mirror-cli.bat import-chunks --src D:\path\to\analysis-world --dst D:\path\to\save --mode mirror --dry-run
@@ -29,9 +29,11 @@ The layout follows the Minecraft version: 1.21.11 and earlier use `region`, `DIM
 | `default` | Reads Minecraft `level.dat`; ignores World Mirror metadata and SQLite even if present | Missing chunks plus existing chunks with no blocks, regardless of biomes |
 | `mirror` | Requires supported `worldmirror_meta.json`; reads and updates `data/world_mirror.sqlite` | Missing or physically empty chunks, plus newer replay chunks when an existing index record has comparable time and no stronger source priority |
 
-An existing nonempty region chunk with no matching mirror index record has unknown provenance and is preserved. Both modes always replace physically empty chunks, including biome-only chunks. `--policy empty-only` limits mirror imports to missing and physically empty chunks. `--policy timestamp` is mirror-only. A replay from another server is rejected in mirror mode unless `--allow-source-mismatch` is explicitly given. Unknown mirror metadata schemas are rejected. The destination layout defaults from its own `level.dat`; `--destination-layout` overrides it.
+Mirror imports preserve nonempty chunks with no matching index record by default. Use `--replace-unindexed` with the mirror timestamp policy to overwrite those chunks and record their replay capture times. The dry run reports them under `unindexed_replaced`. Indexed nonempty chunks still follow their timestamp and source priority. Both modes can fill missing and physically empty chunks, including biome-only chunks. A zero-byte MCA file is an empty region. `--policy empty-only` limits mirror imports to missing and physically empty chunks. `--policy timestamp` is mirror-only. A replay from another server is rejected in mirror mode unless `--allow-source-mismatch` is explicitly given. Unknown mirror metadata schemas are rejected. The destination layout defaults from its own `level.dat`. Use `--destination-layout` to override it.
 
-The command prints a plan before writing. When source and destination Minecraft versions differ, it asks `y/N`; `--yes` explicitly accepts the mismatch. `--dry-run` only prints the plan. A real import takes the save's `session.lock` and saves copies of affected region files, mirror metadata, and SQLite under `backups/toolkit-import-<UTC time>` before writing. Keep Minecraft closed during import. `index` writes a JSONL packet-event index; `schemas` and `selftest` report bundled support.
+The command prints a plan before writing. When source and destination Minecraft versions differ, it asks `y/N`. Use `--yes` to accept the mismatch. `--dry-run` only prints the plan. A real import takes the save's `session.lock`, rechecks the plan, and backs up affected region files, mirror metadata, and SQLite before writing. Keep Minecraft closed during import. Each region is reopened and the imported NBT is verified before SQLite is updated. After an interrupted import, `verify_only` counts identical entries that can finish recording their index or metadata without rewriting MCA. `index` writes a JSONL packet-event index. The `schemas` and `selftest` commands report bundled support.
+
+Use `--no-backup` when a backup already exists. The importer keeps a temporary rollback file only for the region it is updating and removes it when that region finishes.
 
 ## Modules
 
@@ -45,7 +47,7 @@ The command prints a plan before writing. When source and destination Minecraft 
 | `world-mirror-cli` | Command line interface |
 | `world-mirror-gui` | Placeholder UI |
 
-The toolkit resolves `world-mirror-format:0.1.1` from the public GitHub Release through a Gradle Ivy repository. A neighboring `world-mirror` checkout is not required. That module owns World Mirror metadata paths, SQLite chunk-index rules, and source priority rules; the toolkit applies them to replay imports. It has no Maven Central dependency. The [format README](https://github.com/billstark001/world-mirror/blob/main/world-mirror-format/README.md) describes its release assets.
+The toolkit uses `world-mirror-format:0.1.3` for metadata paths, SQLite, source priority and region verification. The command above builds against the neighboring format checkout. Once the [format release asset](https://github.com/billstark001/world-mirror/blob/main/world-mirror-format/README.md) is published, `gradle :world-mirror-cli:installDist` resolves the JAR through Ivy.
 
 ## Scope
 

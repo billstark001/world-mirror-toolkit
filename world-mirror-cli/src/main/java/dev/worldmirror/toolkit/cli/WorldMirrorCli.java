@@ -147,8 +147,14 @@ public final class WorldMirrorCli implements Callable<Integer> {
         @Option(names = "--allow-source-mismatch", description = "permit a replay source different from mirror sourceId")
         boolean allowSourceMismatch;
 
+        @Option(names = "--replace-unindexed", description = "replace nonempty chunks without an index row in mirror timestamp mode")
+        boolean replaceUnindexed;
+
         @Option(names = "--dry-run", description = "plan changes without modifying the destination")
         boolean dryRun;
+
+        @Option(names = "--no-backup", description = "do not retain a backup of the destination files")
+        boolean noBackup;
 
         @Option(names = "--yes", description = "accept a source/destination version mismatch")
         boolean yes;
@@ -169,7 +175,7 @@ public final class WorldMirrorCli implements Callable<Integer> {
             };
             ChunkImporter importer = new ChunkImporter();
             var plan = importer.plan(new ChunkImporter.Options(source, destination, selectedMode,
-                    selectedPolicy, destinationLayout, allowSourceMismatch));
+                    selectedPolicy, destinationLayout, allowSourceMismatch), replaceUnindexed);
             ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
             System.out.println(mapper.writeValueAsString(plan.asMap()));
             if (dryRun) return 0;
@@ -179,8 +185,10 @@ public final class WorldMirrorCli implements Callable<Integer> {
                 int answer = System.in.read();
                 if (answer != 'y' && answer != 'Y') return 2;
             }
-            Path backup = importer.execute(plan);
-            System.out.println("import complete; backup=" + (backup == null ? "none (no changes)" : backup));
+            Path backup = importer.execute(plan, !noBackup);
+            boolean changed = plan.chunksToWrite() > 0 || plan.chunksToVerifyOnly() > 0;
+            String backupStatus = !changed ? "none (no changes)" : noBackup ? "disabled" : backup.toString();
+            System.out.println("import complete; backup=" + backupStatus);
             return 0;
         }
     }

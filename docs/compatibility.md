@@ -18,10 +18,12 @@ The configuration registry-data packet is ID 7, and finish-configuration is ID 3
 | Configuration/play transitions and biome registry | Verified | Verified | Decoder present; no sample |
 | Full chunk packets, block states, light, block entities | Verified | Verified | Decoder present; no sample |
 | Login/respawn dimension changes | Verified | Verified | Decoder present; no sample |
-| Minimal versioned `level.dat`, analysis manifest, and chunk import | Implemented; no end-to-end sample | Verified on 22,221 chunks | Implemented; no end-to-end sample |
+| Minimal versioned `level.dat`, analysis manifest, and chunk import | Verified on 8,339 chunks | Verified on 22,221 chunks | Implemented; no end-to-end sample |
 | Incremental block/entity updates, heightmaps, entities, POI | Unimplemented | Unimplemented | Unimplemented |
 
 Minecraft 1.21.11 and the `1.20.1` schema template are not bundled as supported replay targets. An external schema alone is insufficient when the packet layout or registry mapping differs.
+
+The 26.1.2 recording was imported into a temporary mirror. All 8,339 MCA payloads matched the export, and the SQLite records matched their dimension, coordinates, capture timestamp, and acquisition source. Repeating the import produced an empty write plan and left the region files untouched.
 
 The 26.2 validation used the supplied recording locally. The replay and generated worlds are kept outside version control. Two different login hashed seeds identify two worlds. The larger has 4,137 overworld and 2,263 Nether chunks; the smaller has 515 overworld chunks. Previous dimension-only merging had combined 478 coordinate collisions into one output and produced visible seams. The Nether dimension type starts at section Y=0, while the overworld starts at section Y=-4. The old export applied -4 to both and shifted the Nether down 64 blocks. All 6,915 output chunks were independently checked for DataVersion, dimension-specific `yPos` and section Y bounds, and absence of `ReplayRecovered.Warnings`.
 

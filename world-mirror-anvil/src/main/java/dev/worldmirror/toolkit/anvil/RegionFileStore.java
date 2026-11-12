@@ -8,6 +8,7 @@ import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.BitSet;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.zip.GZIPInputStream;
@@ -24,18 +25,26 @@ final class RegionFileStore {
         Map<Integer, Slot> slots = new TreeMap<>();
         if (!Files.exists(path)) return slots;
         try (RandomAccessFile file = new RandomAccessFile(path.toFile(), "r")) {
-            if (file.length() < SECTOR * 2) throw new IOException("truncated region header: " + path);
+            long lengthOnDisk = file.length();
+            if (lengthOnDisk == 0) return slots;
+            if (lengthOnDisk < SECTOR * 2) throw new IOException("truncated region header: " + path);
             byte[] header = new byte[SECTOR * 2];
             file.readFully(header);
+            BitSet occupied = new BitSet();
             for (int i = 0; i < 1024; i++) {
                 int p = i * 4;
                 int sector = ((header[p] & 255) << 16) | ((header[p + 1] & 255) << 8)
                         | (header[p + 2] & 255);
                 int count = header[p + 3] & 255;
                 if (sector == 0 && count == 0) continue;
-                if (sector < 2 || count < 1 || ((long) sector + count) * SECTOR > file.length()) {
+                if (sector < 2 || count < 1 || ((long) sector + count) * SECTOR > lengthOnDisk) {
                     throw new IOException("invalid region slot " + i + " in " + path);
                 }
+                int overlap = occupied.nextSetBit(sector);
+                if (overlap >= 0 && overlap < sector + count) {
+                    throw new IOException("overlapping region slot " + i + " in " + path);
+                }
+                occupied.set(sector, sector + count);
                 file.seek((long) sector * SECTOR);
                 int length = file.readInt();
                 if (length < 1 || length > count * SECTOR - 4) {
@@ -106,14 +115,34 @@ final class RegionFileStore {
                 out.seek(0);
                 out.write(locations);
                 out.write(timestamps);
+                out.getFD().sync();
             }
-            try {
-                Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
-                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
-            }
+            replace(temp, path);
         } finally {
             Files.deleteIfExists(temp);
+        }
+    }
+
+    /** Restore the original bytes. A null backup means the target was newly created. */
+    void restore(Path target, Path backup) throws IOException {
+        if (backup == null) {
+            Files.deleteIfExists(target);
+            return;
+        }
+        Path temporary = Files.createTempFile(target.getParent(), "region-restore-", ".tmp");
+        try {
+            Files.copy(backup, temporary, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+            replace(temporary, target);
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static void replace(Path staged, Path target) throws IOException {
+        try {
+            Files.move(staged, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
+            Files.move(staged, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 }

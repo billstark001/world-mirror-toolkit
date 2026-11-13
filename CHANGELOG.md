@@ -9,7 +9,7 @@
 
 ### Fixed
 
-- Refuse imports while destination recovery is pending or import paths point through symbolic links.
+- Refuse imports while destination recovery is pending or import paths point through symbolic links or Windows directory junctions.
 
 ## [0.1.1] — 2026-11-13
 

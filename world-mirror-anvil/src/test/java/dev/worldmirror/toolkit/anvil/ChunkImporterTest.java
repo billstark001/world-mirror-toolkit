@@ -16,7 +16,9 @@ import java.sql.DriverManager;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -261,6 +263,58 @@ class ChunkImporterTest {
         assertEquals("untouched", Files.readString(lockTarget));
         assertTrue(Files.notExists(outside.resolve("world_mirror.sqlite")));
         assertTrue(Files.notExists(region(destination)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"data", "backups", "dimensions/minecraft"})
+    void rejectsWindowsDirectoryJunctions(String directory) throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(System.getProperty("os.name")
+                .toLowerCase(Locale.ROOT).startsWith("windows"));
+        Path source = source();
+        Path destination = destination();
+        writeRegion(source, Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:stone", CAPTURE)));
+        writeMirrorMetadata(destination);
+        Path outside = Files.createDirectory(temporary.resolve("outside"));
+        Path sentinel = Files.writeString(outside.resolve("keep.txt"), "untouched");
+        Path junction = destination.resolve(directory);
+        Files.createDirectories(junction.getParent());
+        var importer = new ChunkImporter();
+        var options = mirrorOptions(source, destination);
+        var preview = importer.plan(options);
+
+        createJunction(junction, outside);
+        try {
+            if (!directory.equals("backups")) {
+                assertTrue(assertThrows(IOException.class, () -> importer.plan(options))
+                        .getMessage().contains("not a plain directory"));
+            }
+            assertTrue(assertThrows(IOException.class, () -> importer.execute(preview))
+                    .getMessage().contains("not a plain directory"));
+            assertEquals("untouched", Files.readString(sentinel));
+            try (var files = Files.list(outside)) {
+                assertEquals(List.of(sentinel), files.toList());
+            }
+            assertTrue(Files.notExists(region(destination)));
+        } finally {
+            Files.delete(junction);
+        }
+    }
+
+    private static void createJunction(Path junction, Path target) throws IOException, InterruptedException {
+        var builder = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                "$ErrorActionPreference = 'Stop'; New-Item -ItemType Junction "
+                        + "-Path $env:WM_TEST_JUNCTION -Target $env:WM_TEST_JUNCTION_TARGET | Out-Null");
+        builder.environment().put("WM_TEST_JUNCTION", junction.toString());
+        builder.environment().put("WM_TEST_JUNCTION_TARGET", target.toString());
+        var process = builder.redirectErrorStream(true).start();
+        if (!process.waitFor(10, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            throw new IOException("Timed out creating a test junction");
+        }
+        if (process.exitValue() != 0) {
+            throw new IOException("Could not create a test junction: "
+                    + new String(process.getInputStream().readAllBytes(), java.nio.charset.Charset.defaultCharset()));
+        }
     }
 
     @Test

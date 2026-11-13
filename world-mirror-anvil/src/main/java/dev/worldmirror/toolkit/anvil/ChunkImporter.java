@@ -24,9 +24,11 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
@@ -321,9 +323,14 @@ public final class ChunkImporter {
     }
 
     private static void requirePlainDirectory(Path path) throws IOException {
-        if (!Files.notExists(path, LinkOption.NOFOLLOW_LINKS)
-                && !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException("not a plain directory: " + path);
+        try {
+            var attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            // NTFS junctions can report both isDirectory and isOther.
+            if (!attributes.isDirectory() || attributes.isOther() || attributes.isSymbolicLink()) {
+                throw new IOException("not a plain directory: " + path);
+            }
+        } catch (NoSuchFileException missing) {
+            // The import may create a missing directory.
         }
     }
 

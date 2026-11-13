@@ -16,6 +16,14 @@ application {
     mainClass.set("dev.worldmirror.toolkit.cli.WorldMirrorCli")
 }
 
+distributions.main {
+    contents {
+        from(rootProject.file("LICENSE"))
+        from(rootProject.file("README.md"))
+        from(rootProject.file("CHANGELOG.md"))
+    }
+}
+
 tasks.jar {
     manifest { attributes("Main-Class" to application.mainClass.get()) }
 }

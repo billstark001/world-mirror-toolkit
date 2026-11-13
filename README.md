@@ -8,8 +8,12 @@ See [the compatibility matrix](docs/compatibility.md) for verified versions and 
 
 ## Build and run
 
+With Java 21 installed, download the CLI ZIP from [GitHub Releases](https://github.com/billstark001/world-mirror-toolkit/releases), extract it, and run `bin/world-mirror-cli` on Linux or macOS or `bin\world-mirror-cli.bat` on Windows.
+
+To build from source with the published Format dependency:
+
 ```powershell
-gradle --include-build ../world-mirror/world-mirror-format :world-mirror-cli:installDist
+gradle :world-mirror-cli:installDist
 .\world-mirror-cli\build\install\world-mirror-cli\bin\world-mirror-cli.bat schemas
 .\world-mirror-cli\build\install\world-mirror-cli\bin\world-mirror-cli.bat export-analysis -i D:\path\to\replays -o D:\path\to\analysis-world --world longest
 .\world-mirror-cli\build\install\world-mirror-cli\bin\world-mirror-cli.bat import-chunks --src D:\path\to\analysis-world --dst D:\path\to\save --mode mirror --dry-run
@@ -47,7 +51,7 @@ Use `--no-backup` when a backup already exists. The importer keeps a temporary r
 | `world-mirror-cli` | Command line interface |
 | `world-mirror-gui` | Placeholder UI |
 
-The toolkit uses `world-mirror-format:0.1.3` for metadata paths, SQLite, source priority and region verification. The command above builds against the neighboring format checkout. Once the [format release asset](https://github.com/billstark001/world-mirror/blob/main/world-mirror-format/README.md) is published, `gradle :world-mirror-cli:installDist` resolves the JAR through Ivy.
+The toolkit uses `world-mirror-format:0.1.3` for metadata paths, SQLite, source priority and region verification. Gradle resolves the JAR from the [Format release](https://github.com/billstark001/world-mirror/releases/tag/world-mirror-format-v0.1.3) through Ivy. To build against a neighboring Format checkout, add `--include-build ../world-mirror/world-mirror-format` to the Gradle command.
 
 ## Scope
 

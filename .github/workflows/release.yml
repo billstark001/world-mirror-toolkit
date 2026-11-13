@@ -1,0 +1,103 @@
+name: Release Toolkit
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to retry
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Validate version and extract release notes
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^[[:space:]]*version = "\([^"]*\)"$/\1/p' build.gradle.kts)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$RELEASE_TAG" = "v$version"
+          mkdir -p build/release
+          awk -v header="## [$version] " '
+            /^## / { if (found) exit; found = index($0, header) == 1 }
+            found { print }
+          ' CHANGELOG.md > build/release/release-notes.md
+          test -s build/release/release-notes.md
+          printf 'version=%s\ntag=%s\n' "$version" "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Test and package the CLI
+        shell: bash
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          gradle --no-daemon check :world-mirror-cli:distZip
+          archive="world-mirror-cli-$VERSION.zip"
+          cp "world-mirror-cli/build/distributions/$archive" build/release/
+          unzip -q "build/release/$archive" -d "$RUNNER_TEMP/toolkit-release"
+          cli="$RUNNER_TEMP/toolkit-release/world-mirror-cli-$VERSION/bin/world-mirror-cli"
+          test "$("$cli" --version)" = "world-mirror-toolkit $VERSION"
+          "$cli" selftest
+          (cd build/release && sha256sum "$archive" > "$archive.sha256")
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolkit-release-${{ steps.metadata.outputs.tag }}
+          path: build/release/
+          if-no-files-found: error
+
+  publish-github:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: toolkit-release-${{ needs.build.outputs.tag }}
+          path: build/release
+
+      - name: Publish Toolkit release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.tag }}
+          name: World Mirror Toolkit ${{ needs.build.outputs.tag }}
+          body_path: build/release/release-notes.md
+          files: |
+            build/release/*.zip
+            build/release/*.sha256
+          fail_on_unmatched_files: true

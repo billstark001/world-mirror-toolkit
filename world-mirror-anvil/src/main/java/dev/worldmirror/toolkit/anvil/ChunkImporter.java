@@ -40,6 +40,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -51,6 +52,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -77,9 +79,17 @@ public final class ChunkImporter {
     private record MirrorMetadata(ObjectNode document, MirrorIdentity identity, long lastSyncTime) {}
     private record Decision(Path sourceRegion, int slot, ChunkUpdate update, ChunkRecord previousIndex,
             String sourceDigest, String targetDigest, boolean replaceIndexClaim, boolean verifyOnly,
-            boolean replaceUnindexed, MirrorIdentity mirror, ReplaySourceRouting.Evidence routing) {}
+            boolean replaceUnindexed, boolean seedReplacement, boolean receivedCapture, boolean seeded,
+            String blendEpoch, boolean retainBlend, MirrorIdentity mirror, ReplaySourceRouting.Evidence routing) {
+        Decision withoutBlend() {
+            return new Decision(sourceRegion, slot, update, previousIndex, sourceDigest, targetDigest,
+                    replaceIndexClaim, verifyOnly, replaceUnindexed, seedReplacement, receivedCapture,
+                    seeded, null, false, mirror, routing);
+        }
+    }
     private record PlanningPolicy(boolean mirror, WritePolicy writePolicy, boolean replaceUnindexed,
-            int dataVersion, long lastSyncTime, MirrorIdentity identity, ReplaySourceRouting.Evidence routing) {}
+            int dataVersion, long lastSyncTime, MirrorIdentity identity,
+            ReplaySourceRouting.Evidence routing) {}
     private record PlannedRegion(List<Decision> decisions, int missing, int empty, int newer, int preserved) {}
     private record StagedChunk(Decision decision, RegionFileStore.Slot expected) {}
     public record Plan(Options options, AnalysisExportMetadata sourceMetadata,
@@ -163,12 +173,19 @@ public final class ChunkImporter {
         long lastSyncTime = 0;
         MirrorIdentity mirror = null;
         ReplaySourceRouting.Evidence sourceRouting = null;
+        boolean seeded = false;
+        String blendEpoch = null;
         Path database = mirrorPaths.chunkIndex();
         if (options.mode() == Mode.MIRROR) {
             MirrorMetadata metadata = mirrorMetadata(mirrorPaths.metadata());
             mirror = metadata.identity();
             sourceId = mirror.sourceId();
             lastSyncTime = metadata.lastSyncTime();
+            var generation = metadata.document().path("generation");
+            seeded = "SEEDED".equals(generation.path("mode").textValue());
+            if (seeded && generation.path("blendTerrain").isBoolean() && generation.path("blendTerrain").booleanValue()) {
+                blendEpoch = blendEpoch(generation.path("seedEpoch").textValue(), mirrorPaths.metadata());
+            }
             sourceRouting = ReplaySourceRouting.verify(destination, mirror.nodeId(), mirror.parentNodeId(),
                     export.sourceKey(), routing, options.allowSourceMismatch());
             requireIndexFiles(database);
@@ -181,6 +198,11 @@ public final class ChunkImporter {
             ChunkIndexStore index = connection == null ? null : new ChunkIndexStore(connection, sourceId);
             WritePolicy writePolicy = options.policy() == Policy.TIMESTAMP
                     ? WritePolicy.REPLACE_OLDER : WritePolicy.FILL_EMPTY;
+            if (index != null && writePolicy == WritePolicy.REPLACE_OLDER
+                    && (!index.hasRegisteredSource(ChunkIndexStore.REPLAY_IMPORT)
+                            || !index.hasRegisteredSource(ChunkIndexStore.SEED_GENERATED))) {
+                throw new IOException("upgrade the chunk index in World Mirror before a timestamp import: " + database);
+            }
             var policy = new PlanningPolicy(options.mode() == Mode.MIRROR, writePolicy, replaceUnindexed,
                     export.dataVersion(), lastSyncTime, mirror, sourceRouting);
             Map<Path, List<Decision>> decisions = new LinkedHashMap<>();
@@ -198,19 +220,23 @@ public final class ChunkImporter {
                 if (!Files.isDirectory(sourceDir)) throw new IOException("missing source region directory " + sourceDir);
                 Map<String, Integer> priorities = index != null && writePolicy == WritePolicy.REPLACE_OLDER
                         ? index.sourcePriorities(dimensionName) : Map.of();
+                String dimensionBlend = "minecraft:overworld".equals(dimensionName) ? blendEpoch : null;
+                Map<Path, List<Decision>> dimensionDecisions = new LinkedHashMap<>();
                 try (var files = Files.list(sourceDir)) {
                     for (Path sourceRegion : files.filter(Files::isRegularFile).sorted().toList()) {
                         Path targetRegion = targetDir.resolve(sourceRegion.getFileName());
                         PlannedRegion region = planRegion(sourceRegion, targetRegion, dimensionName,
-                                policy, index, priorities, hasher);
+                                policy, index, priorities, hasher, seeded, dimensionBlend);
                         if (region == null) continue;
-                        if (!region.decisions().isEmpty()) decisions.put(targetRegion, region.decisions());
+                        if (!region.decisions().isEmpty()) dimensionDecisions.put(targetRegion, region.decisions());
                         missing += region.missing();
                         empty += region.empty();
                         newer += region.newer();
                         preserved += region.preserved();
                     }
                 }
+                if (dimensionBlend != null) restrictBlendToBorders(targetDir, dimensionDecisions);
+                decisions.putAll(dimensionDecisions);
             }
             return new Plan(options, export, targetVersion, decisions, missing, empty, newer, preserved,
                     database, sourceId);
@@ -220,7 +246,8 @@ public final class ChunkImporter {
     }
 
     private PlannedRegion planRegion(Path sourceRegion, Path targetRegion, String dimensionName,
-            PlanningPolicy policy, ChunkIndexStore index, Map<String, Integer> priorities, MessageDigest hasher)
+            PlanningPolicy policy, ChunkIndexStore index, Map<String, Integer> priorities, MessageDigest hasher,
+            boolean seeded, String blendEpoch)
             throws IOException, SQLException {
         Matcher name = REGION.matcher(sourceRegion.getFileName().toString());
         if (!name.matches()) return null;
@@ -234,12 +261,14 @@ public final class ChunkImporter {
         Map<Integer, RegionFileStore.Slot> existing = regions.read(targetRegion);
         Map<ChunkCoordinate, ChunkRecord> indexed = index == null ? Map.of()
                 : indexedRegion(index, dimensionName, regionX, regionZ);
+        Set<Integer> auxiliary = null;
         for (var slotEntry : incoming.entrySet()) {
             int slot = slotEntry.getKey();
             var coordinate = new ChunkCoordinate(
                     regionX * 32 + slot % 32, regionZ * 32 + slot / 32);
             RegionFileStore.Slot next = slotEntry.getValue();
-            ChunkFacts sourceFacts = ChunkFacts.from(regions.chunk(next), next.timestampSeconds());
+            var sourceChunk = regions.chunk(next);
+            ChunkFacts sourceFacts = ChunkFacts.from(sourceChunk, next.timestampSeconds());
             if (sourceFacts.x() != coordinate.x() || sourceFacts.z() != coordinate.z()
                     || sourceFacts.dataVersion() != policy.dataVersion()) {
                 throw new IOException("source chunk coordinate/DataVersion mismatch at " + sourceRegion
@@ -253,27 +282,73 @@ public final class ChunkImporter {
             RegionFileStore.Slot old = existing.get(slot);
             boolean identical = matches(old, next);
             Destination state = Destination.MISSING;
+            NbtValue.CompoundValue oldChunk = null;
             if (old != null) {
-                ChunkFacts oldFacts = identical ? sourceFacts
-                        : ChunkFacts.from(regions.chunk(old), old.timestampSeconds());
+                oldChunk = identical ? sourceChunk : regions.chunk(old);
+                ChunkFacts oldFacts = identical ? sourceFacts : ChunkFacts.from(oldChunk, old.timestampSeconds());
                 state = oldFacts.noBlocks() ? Destination.EMPTY : Destination.PRESENT;
             }
             ChunkRecord record = indexed.get(coordinate);
-            IndexStatus status = state == Destination.PRESENT && policy.writePolicy() == WritePolicy.REPLACE_OLDER
-                    ? ChunkUpdatePolicy.assess(update, record, priorities) : IndexStatus.UNINDEXED;
-            Action action = ChunkUpdatePolicy.decide(policy.writePolicy(), state, status);
+            boolean timestamp = policy.writePolicy() == WritePolicy.REPLACE_OLDER;
+            boolean seedRow = record != null && ChunkIndexStore.SEED_GENERATED.equals(record.updateSource());
             boolean alreadyIndexed = record != null && record.updateTime() == update.captureTime()
                     && update.updateSource().equals(record.updateSource());
+            if (policy.mirror() && SeedTerrainEvidence.hasCaptureReceipt(oldChunk)
+                    && (seedRow || record == null || alreadyIndexed)
+                    && (!seedRow || record.updateTime() == ChunkIndexStore.SEED_GENERATED_TIME)
+                    && SeedTerrainEvidence.matchesReplayReceipt(oldChunk, policy.identity().nodeId(),
+                            update.captureTime(), sourceChunk, seeded ? dimensionName : null)) {
+                if (!alreadyIndexed || policy.lastSyncTime() < update.captureTime()) {
+                    decisions.add(new Decision(sourceRegion, slot, update, record, fingerprint(hasher, next),
+                            fingerprint(hasher, old), false, true, false, false, true, seeded, null, false,
+                            policy.identity(), policy.routing()));
+                } else {
+                    preserved++;
+                }
+                continue;
+            }
+            boolean seedTerrain = seedRow || SeedTerrainEvidence.hasReceipt(oldChunk);
+            boolean seedReplacement = false;
+            IndexStatus status = IndexStatus.UNINDEXED;
+            if (policy.mirror() && old != null && timestamp && record == null
+                    && SeedTerrainEvidence.hasCaptureReceipt(oldChunk)) {
+                preserved++;
+                continue;
+            }
+            if (policy.mirror() && old != null && seedTerrain && (timestamp || state == Destination.EMPTY)) {
+                if (auxiliary == null) auxiliary = auxiliarySlots(targetRegion);
+                if (auxiliary.contains(slot)) {
+                    preserved++;
+                    continue;
+                }
+            }
+            if (old != null && timestamp && seedTerrain && (seedRow || record == null)) {
+                var expectedSeed = new ChunkRecord(coordinate.x(), coordinate.z(),
+                        ChunkIndexStore.SEED_GENERATED_TIME, ChunkIndexStore.SEED_GENERATED);
+                if (seedRow && record.updateTime() != expectedSeed.updateTime()
+                        || !SeedTerrainEvidence.isUnmodified(oldChunk)
+                        || ChunkUpdatePolicy.assess(update, expectedSeed, priorities) != IndexStatus.ELIGIBLE) {
+                    preserved++;
+                    continue;
+                }
+                seedReplacement = true;
+                status = IndexStatus.ELIGIBLE;
+            } else if (state == Destination.PRESENT && timestamp) {
+                status = ChunkUpdatePolicy.assess(update, record, priorities);
+            }
+            Action action = ChunkUpdatePolicy.decide(policy.writePolicy(), state, status);
             boolean needsReceipt = alreadyIndexed ? policy.lastSyncTime() < update.captureTime()
                     : record == null || action == Action.WRITE;
             if (identical && policy.mirror() && needsReceipt) {
                 // Recover an interrupted index or metadata commit without rewriting the MCA.
                 String proof = fingerprint(hasher, next);
                 decisions.add(new Decision(sourceRegion, slot, update, record, proof, proof,
-                        !alreadyIndexed && state != Destination.PRESENT, true, false, policy.identity(), policy.routing()));
+                        !alreadyIndexed && state != Destination.PRESENT, true, false, false, false,
+                        seeded, null, false, policy.identity(), policy.routing()));
                 continue;
             }
-            boolean overwriteUnindexed = state == Destination.PRESENT && record == null && policy.replaceUnindexed();
+            boolean overwriteUnindexed = state == Destination.PRESENT && record == null && policy.replaceUnindexed()
+                    && !seedTerrain && !SeedTerrainEvidence.hasCaptureReceipt(oldChunk);
             if (identical || (action != Action.WRITE && !overwriteUnindexed)) {
                 preserved++;
                 continue;
@@ -286,10 +361,64 @@ public final class ChunkImporter {
                 }
             }
             decisions.add(new Decision(sourceRegion, slot, update, record, fingerprint(hasher, next),
-                    fingerprint(hasher, old), state != Destination.PRESENT, false, overwriteUnindexed, policy.identity(),
-                    policy.routing()));
+                    fingerprint(hasher, old), state != Destination.PRESENT, false, overwriteUnindexed,
+                    seedReplacement || policy.mirror() && old != null && seedTerrain, false, seeded,
+                    blendEpoch != null && SeedTerrainEvidence.canBlendReplay(sourceChunk) ? blendEpoch : null,
+                    SeedTerrainEvidence.ownsBlend(oldChunk, blendEpoch),
+                    policy.identity(), policy.routing()));
         }
         return new PlannedRegion(decisions, missing, empty, newer, preserved);
+    }
+
+    private void restrictBlendToBorders(Path directory, Map<Path, List<Decision>> planned) {
+        Set<ChunkCoordinate> written = new HashSet<>();
+        planned.values().forEach(chunks -> chunks.stream().filter(chunk -> !chunk.verifyOnly())
+                .forEach(chunk -> written.add(chunk.update().coordinate())));
+        Map<Path, BitSet> occupancy = new HashMap<>();
+        planned.replaceAll((path, chunks) -> chunks.stream().map(chunk -> {
+            if (chunk.blendEpoch() == null || chunk.retainBlend()
+                    || bordersHole(directory, chunk.update().coordinate(), written, occupancy)) {
+                return chunk;
+            }
+            return chunk.withoutBlend();
+        }).toList());
+    }
+
+    private boolean bordersHole(Path directory, ChunkCoordinate coordinate, Set<ChunkCoordinate> written,
+            Map<Path, BitSet> occupancy) {
+        for (int dz = -1; dz <= 1; dz++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dz == 0) continue;
+                long x = (long) coordinate.x() + dx;
+                long z = (long) coordinate.z() + dz;
+                if ((int) x != x || (int) z != z || written.contains(new ChunkCoordinate((int) x, (int) z))) continue;
+                Path path = directory.resolve("r." + (x >> 5) + "." + (z >> 5) + ".mca");
+                if (!occupancy.containsKey(path)) {
+                    try {
+                        requirePlainFile(path);
+                        occupancy.put(path, regions.occupiedSlots(path));
+                    } catch (IOException unreadable) {
+                        occupancy.put(path, null); // An unreadable neighboring region cannot prove an empty slot.
+                    }
+                }
+                BitSet present = occupancy.get(path);
+                if (present != null && !present.get((int) ((z & 31) * 32 + (x & 31)))) return true;
+            }
+        }
+        return false;
+    }
+
+    private Set<Integer> auxiliarySlots(Path region) throws IOException {
+        Set<Integer> occupied = new HashSet<>();
+        Path dimension = region.getParent().getParent();
+        for (String name : List.of("entities", "poi")) {
+            Path directory = dimension.resolve(name);
+            requirePlainDirectory(directory);
+            Path sibling = directory.resolve(region.getFileName());
+            requirePlainFile(sibling);
+            occupied.addAll(regions.read(sibling).keySet());
+        }
+        return occupied;
     }
 
     private static Path regionDirectory(Path world, WorldLayout layout, DimensionKey dimension) throws IOException {
@@ -398,12 +527,13 @@ public final class ChunkImporter {
         String parent = textField(value, "parentNodeId");
         String kind = textField(value, "kind");
         String role = textField(value, "role");
-        boolean mirror = "MIRROR".equals(kind) && typedId(nodeId, "mirror:")
-                && List.of("mirror:", "snapshot:", "local:", "remote:", "unresolved:").stream()
-                        .anyMatch(prefix -> typedId(parent, prefix))
+        boolean validParent = value.path("parentNodeId").isMissingNode() || value.path("parentNodeId").isNull()
+                || List.of("mirror:", "snapshot:", "local:", "remote:", "unresolved:").stream()
+                        .anyMatch(prefix -> typedId(parent, prefix));
+        boolean mirror = "MIRROR".equals(kind) && typedId(nodeId, "mirror:") && validParent
                 && ("SYNC".equals(role) || "SNAPSHOT".equals(role));
         boolean snapshot = "SNAPSHOT".equals(kind) && typedId(nodeId, "snapshot:") && "SNAPSHOT".equals(role)
-                && (!value.has("parentNodeId") || value.path("parentNodeId").isNull());
+                && validParent;
         if (!mirror && !snapshot) throw new IOException("invalid mirror graph identity: " + file);
         return new MirrorMetadata(value, new MirrorIdentity(sourceId, nodeId, parent, kind, role), sync.longValue());
     }
@@ -411,6 +541,15 @@ public final class ChunkImporter {
     private static String textField(ObjectNode document, String name) {
         String value = document.path(name).textValue();
         return value == null || value.isBlank() || value.chars().anyMatch(Character::isISOControl) ? null : value;
+    }
+
+    private static String blendEpoch(String epoch, Path metadata) throws IOException {
+        try {
+            if (epoch != null && UUID.fromString(epoch).toString().equals(epoch)) return epoch;
+        } catch (IllegalArgumentException malformed) {
+            // A blend marker must carry the target save's canonical seed epoch.
+        }
+        throw new IOException("invalid seed blending epoch in " + metadata);
     }
 
     private static boolean typedId(String id, String prefix) {
@@ -563,6 +702,7 @@ public final class ChunkImporter {
         Map<Integer, RegionFileStore.Slot> slots = regions.read(target);
         Map<Integer, RegionFileStore.Slot> source = regions.read(decisions.getFirst().sourceRegion());
         Map<Integer, StagedChunk> staged = new LinkedHashMap<>();
+        Set<Integer> auxiliary = null;
         MessageDigest hasher = sha256();
         for (Decision decision : decisions) {
             RegionFileStore.Slot incoming = source.get(decision.slot());
@@ -572,8 +712,28 @@ public final class ChunkImporter {
             if (!Objects.equals(decision.targetDigest(), fingerprint(hasher, slots.get(decision.slot())))) {
                 throw new IOException("destination region changed: " + target + " slot " + decision.slot());
             }
-            if (!decision.verifyOnly()) slots.put(decision.slot(), incoming);
-            staged.put(decision.slot(), new StagedChunk(decision, incoming));
+            RegionFileStore.Slot expected = incoming;
+            if (decision.receivedCapture()) expected = slots.get(decision.slot());
+            if (!decision.verifyOnly() && decision.mirror() != null) {
+                if (decision.seedReplacement()) {
+                    if (auxiliary == null) auxiliary = auxiliarySlots(target);
+                    if (auxiliary.contains(decision.slot())) {
+                        throw new IOException("destination auxiliary chunk data changed: " + target
+                                + " slot " + decision.slot());
+                    }
+                }
+                var raw = regions.chunk(incoming);
+                try {
+                    var prepared = SeedTerrainEvidence.prepareReplay(raw, decision.mirror().nodeId(),
+                            decision.update().captureTime(), decision.seedReplacement(), decision.blendEpoch(),
+                            decision.seeded() ? decision.update().dimension() : null);
+                    if (prepared != raw) expected = regions.withChunk(incoming, prepared);
+                } catch (IllegalArgumentException malformed) {
+                    throw new IOException("invalid replay terrain at " + target + " slot " + decision.slot(), malformed);
+                }
+            }
+            if (!decision.verifyOnly()) slots.put(decision.slot(), expected);
+            staged.put(decision.slot(), new StagedChunk(decision, expected));
         }
         if (willWrite(decisions)) regions.write(target, slots);
         return staged;

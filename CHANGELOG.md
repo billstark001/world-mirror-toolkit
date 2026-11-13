@@ -6,6 +6,9 @@
 
 - Require World Mirror metadata schema 2 for mirror imports. Migrate older saves in the mod before importing.
 - Require explicit source confirmation for replay imports. Use the destination's stored SQLite namespace for chunk history and recheck its world identity under the save lock.
+- Require stored replay and seed source rules for timestamp imports. Preserve seed terrain unless the on-disk chunk matches its generation receipt.
+- Check entity and POI slots before replacing seed terrain. Store a capture receipt in the written region entry so a retry can restore its SQLite row after an interrupted commit.
+- When importing a seeded mirror, convert void-mirror biome palettes to vanilla equivalents and mark replayed Overworld borders for blending if enabled in the destination. Preserve native blending data.
 
 ### Fixed
 

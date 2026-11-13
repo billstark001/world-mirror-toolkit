@@ -57,7 +57,7 @@ Use `--no-backup` when a backup already exists. The importer keeps a temporary r
 | `world-mirror-cli` | Command line interface |
 | `world-mirror-gui` | Placeholder UI |
 
-The toolkit uses `world-mirror-format:0.1.3` for metadata paths, SQLite, source priority and region verification. Gradle resolves the JAR from the [Format release](https://github.com/billstark001/world-mirror/releases/tag/world-mirror-format-v0.1.3) through Ivy. To build against a neighboring Format checkout, add `--include-build ../world-mirror/world-mirror-format` to the Gradle command.
+The toolkit uses `world-mirror-format:0.1.4` for metadata paths, SQLite, source priority, seed provenance and region verification. During development, add `--include-build ../world-mirror/world-mirror-format` to the Gradle command. Gradle can resolve published Format releases through Ivy.
 
 ## Scope
 

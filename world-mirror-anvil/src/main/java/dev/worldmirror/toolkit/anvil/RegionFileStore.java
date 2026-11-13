@@ -13,6 +13,7 @@ import java.util.BitSet;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.zip.GZIPInputStream;
+import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 
 /** Reads and rewrites MCA slots while preserving untouched chunk payloads verbatim. */
@@ -21,43 +22,61 @@ final class RegionFileStore {
     private final PortableNbtParser parser = new PortableNbtParser();
 
     record Slot(byte[] payload, int timestampSeconds) {}
+    private record Location(int sector, int count, int timestamp) {}
 
     Map<Integer, Slot> read(Path path) throws IOException {
         Map<Integer, Slot> slots = new TreeMap<>();
         if (!Files.exists(path)) return slots;
         try (RandomAccessFile file = new RandomAccessFile(path.toFile(), "r")) {
-            long lengthOnDisk = file.length();
-            if (LegacyRegionPlaceholder.isEmpty(lengthOnDisk)) return slots;
-            if (lengthOnDisk < SECTOR * 2) throw new IOException("truncated region header: " + path);
-            byte[] header = new byte[SECTOR * 2];
-            file.readFully(header);
-            BitSet occupied = new BitSet();
-            for (int i = 0; i < 1024; i++) {
-                int p = i * 4;
-                int sector = ((header[p] & 255) << 16) | ((header[p + 1] & 255) << 8)
-                        | (header[p + 2] & 255);
-                int count = header[p + 3] & 255;
-                if (sector == 0 && count == 0) continue;
-                if (sector < 2 || count < 1 || ((long) sector + count) * SECTOR > lengthOnDisk) {
-                    throw new IOException("invalid region slot " + i + " in " + path);
-                }
-                int overlap = occupied.nextSetBit(sector);
-                if (overlap >= 0 && overlap < sector + count) {
-                    throw new IOException("overlapping region slot " + i + " in " + path);
-                }
-                occupied.set(sector, sector + count);
-                file.seek((long) sector * SECTOR);
+            for (var entry : locations(file, path).entrySet()) {
+                int i = entry.getKey();
+                Location location = entry.getValue();
+                file.seek((long) location.sector() * SECTOR);
                 int length = file.readInt();
-                if (length < 1 || length > count * SECTOR - 4) {
+                if (length < 1 || length > location.count() * SECTOR - 4) {
                     throw new IOException("invalid chunk length at slot " + i + " in " + path);
                 }
                 byte[] payload = new byte[length];
                 file.readFully(payload);
-                int timestamp = ((header[SECTOR + p] & 255) << 24)
-                        | ((header[SECTOR + p + 1] & 255) << 16)
-                        | ((header[SECTOR + p + 2] & 255) << 8) | (header[SECTOR + p + 3] & 255);
-                slots.put(i, new Slot(payload, timestamp));
+                slots.put(i, new Slot(payload, location.timestamp()));
             }
+        }
+        return slots;
+    }
+
+    BitSet occupiedSlots(Path path) throws IOException {
+        var slots = new BitSet(1024);
+        if (!Files.exists(path)) return slots;
+        try (var file = new RandomAccessFile(path.toFile(), "r")) {
+            locations(file, path).keySet().forEach(slots::set);
+        }
+        return slots;
+    }
+
+    private static Map<Integer, Location> locations(RandomAccessFile file, Path path) throws IOException {
+        Map<Integer, Location> slots = new TreeMap<>();
+        long length = file.length();
+        if (LegacyRegionPlaceholder.isEmpty(length)) return slots;
+        if (length < SECTOR * 2) throw new IOException("truncated region header: " + path);
+        byte[] header = new byte[SECTOR * 2];
+        file.readFully(header);
+        var occupied = new BitSet();
+        for (int i = 0; i < 1024; i++) {
+            int p = i * 4;
+            int sector = ((header[p] & 255) << 16) | ((header[p + 1] & 255) << 8) | (header[p + 2] & 255);
+            int count = header[p + 3] & 255;
+            if (sector == 0 && count == 0) continue;
+            if (sector < 2 || count < 1 || ((long) sector + count) * SECTOR > length) {
+                throw new IOException("invalid region slot " + i + " in " + path);
+            }
+            int overlap = occupied.nextSetBit(sector);
+            if (overlap >= 0 && overlap < sector + count) {
+                throw new IOException("overlapping region slot " + i + " in " + path);
+            }
+            occupied.set(sector, sector + count);
+            int timestamp = ((header[SECTOR + p] & 255) << 24) | ((header[SECTOR + p + 1] & 255) << 16)
+                    | ((header[SECTOR + p + 2] & 255) << 8) | (header[SECTOR + p + 3] & 255);
+            slots.put(i, new Location(sector, count, timestamp));
         }
         return slots;
     }
@@ -78,6 +97,15 @@ final class RegionFileStore {
         } catch (RuntimeException invalid) {
             throw new IOException("invalid chunk NBT", invalid);
         }
+    }
+
+    Slot withChunk(Slot original, NbtValue.CompoundValue chunk) throws IOException {
+        var bytes = new ByteArrayOutputStream();
+        bytes.write(2); // zlib
+        try (var compressed = new DeflaterOutputStream(bytes)) {
+            compressed.write(new PortableNbtWriter().writeUnnamedRoot(chunk));
+        }
+        return new Slot(bytes.toByteArray(), original.timestampSeconds());
     }
 
     void write(Path path, Map<Integer, Slot> slots) throws IOException {

@@ -87,6 +87,9 @@ final class ReplaySourceRouting {
     static Evidence verify(Path destination, String mirrorId, String parentId, String replayKey,
             ChunkImporter.Routing request, boolean allowMismatch) throws IOException {
         Path graph = graphPath(destination, request.worldGraph());
+        if (parentId == null) {
+            return unverified(mirrorId, request, graph, allowMismatch);
+        }
         String server = replayKey != null && replayKey.startsWith(SERVER_PREFIX)
                 ? replayKey.substring(SERVER_PREFIX.length()) : null;
         if (graph == null) {

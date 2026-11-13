@@ -69,14 +69,17 @@ public final class ChunkImporter {
 
     public record Options(Path source, Path destination, Mode mode, Policy policy,
             String destinationLayout, boolean allowSourceMismatch) {}
+    public record Routing(Path worldGraph, String replaySource) {
+        public static final Routing AUTO = new Routing(null, null);
+    }
     private record MirrorIdentity(String sourceId, String nodeId, String parentNodeId,
             String kind, String role) {}
     private record MirrorMetadata(ObjectNode document, MirrorIdentity identity, long lastSyncTime) {}
     private record Decision(Path sourceRegion, int slot, ChunkUpdate update, ChunkRecord previousIndex,
             String sourceDigest, String targetDigest, boolean replaceIndexClaim, boolean verifyOnly,
-            boolean replaceUnindexed, MirrorIdentity mirror) {}
+            boolean replaceUnindexed, MirrorIdentity mirror, ReplaySourceRouting.Evidence routing) {}
     private record PlanningPolicy(boolean mirror, WritePolicy writePolicy, boolean replaceUnindexed,
-            int dataVersion, long lastSyncTime, MirrorIdentity identity) {}
+            int dataVersion, long lastSyncTime, MirrorIdentity identity, ReplaySourceRouting.Evidence routing) {}
     private record PlannedRegion(List<Decision> decisions, int missing, int empty, int newer, int preserved) {}
     private record StagedChunk(Decision decision, RegionFileStore.Slot expected) {}
     public record Plan(Options options, AnalysisExportMetadata sourceMetadata,
@@ -105,6 +108,10 @@ public final class ChunkImporter {
             value.put("destination_version", destinationVersion.minecraftVersion());
             value.put("mode", options.mode().name().toLowerCase(Locale.ROOT));
             value.put("policy", options.policy().name().toLowerCase(Locale.ROOT));
+            if (options.mode() == Mode.MIRROR && !decisions.isEmpty()) {
+                var routing = decisions.values().iterator().next().getFirst().routing();
+                value.put("replay_source", routing.source());
+            }
             value.put("version_mismatch", versionMismatch());
             value.put("missing", missing);
             value.put("empty_replaced", emptyReplaced);
@@ -123,11 +130,22 @@ public final class ChunkImporter {
     }
 
     public Plan plan(Options options, boolean replaceUnindexed) throws IOException {
+        return plan(options, replaceUnindexed, Routing.AUTO);
+    }
+
+    public Plan plan(Options options, boolean replaceUnindexed, Routing routing) throws IOException {
+        return plan(options, replaceUnindexed, routing, options.destination().toRealPath());
+    }
+
+    private Plan plan(Options options, boolean replaceUnindexed, Routing routing, Path destination)
+            throws IOException {
+        if (options.mode() != Mode.MIRROR && !Routing.AUTO.equals(routing)) {
+            throw new IOException("--world-graph and --replay-source require --mode mirror");
+        }
         if (replaceUnindexed && (options.mode() != Mode.MIRROR || options.policy() != Policy.TIMESTAMP)) {
             throw new IOException("replacing unindexed chunks requires mirror mode with the timestamp policy");
         }
         Path source = options.source().toRealPath();
-        Path destination = options.destination().toRealPath();
         if (source.equals(destination) || source.startsWith(destination) || destination.startsWith(source)) {
             throw new IOException("source and destination must be separate save trees");
         }
@@ -144,16 +162,15 @@ public final class ChunkImporter {
         String sourceId = null;
         long lastSyncTime = 0;
         MirrorIdentity mirror = null;
+        ReplaySourceRouting.Evidence sourceRouting = null;
         Path database = mirrorPaths.chunkIndex();
         if (options.mode() == Mode.MIRROR) {
             MirrorMetadata metadata = mirrorMetadata(mirrorPaths.metadata());
             mirror = metadata.identity();
             sourceId = mirror.sourceId();
             lastSyncTime = metadata.lastSyncTime();
-            if (!options.allowSourceMismatch()) {
-                throw new IOException("mirror " + mirror.nodeId() + " has no replay endpoint binding; "
-                        + "use --allow-source-mismatch after verifying the target");
-            }
+            sourceRouting = ReplaySourceRouting.verify(destination, mirror.nodeId(), mirror.parentNodeId(),
+                    export.sourceKey(), routing, options.allowSourceMismatch());
             requireIndexFiles(database);
         } else if (options.policy() == Policy.TIMESTAMP) {
             throw new IOException("timestamp policy requires --mode mirror and a chunk index");
@@ -165,7 +182,7 @@ public final class ChunkImporter {
             WritePolicy writePolicy = options.policy() == Policy.TIMESTAMP
                     ? WritePolicy.REPLACE_OLDER : WritePolicy.FILL_EMPTY;
             var policy = new PlanningPolicy(options.mode() == Mode.MIRROR, writePolicy, replaceUnindexed,
-                    export.dataVersion(), lastSyncTime, mirror);
+                    export.dataVersion(), lastSyncTime, mirror, sourceRouting);
             Map<Path, List<Decision>> decisions = new LinkedHashMap<>();
             Set<Path> sourceDirectories = new HashSet<>();
             Set<Path> targetDirectories = new HashSet<>();
@@ -253,7 +270,7 @@ public final class ChunkImporter {
                 // Recover an interrupted index or metadata commit without rewriting the MCA.
                 String proof = fingerprint(hasher, next);
                 decisions.add(new Decision(sourceRegion, slot, update, record, proof, proof,
-                        !alreadyIndexed && state != Destination.PRESENT, true, false, policy.identity()));
+                        !alreadyIndexed && state != Destination.PRESENT, true, false, policy.identity(), policy.routing()));
                 continue;
             }
             boolean overwriteUnindexed = state == Destination.PRESENT && record == null && policy.replaceUnindexed();
@@ -269,7 +286,8 @@ public final class ChunkImporter {
                 }
             }
             decisions.add(new Decision(sourceRegion, slot, update, record, fingerprint(hasher, next),
-                    fingerprint(hasher, old), state != Destination.PRESENT, false, overwriteUnindexed, policy.identity()));
+                    fingerprint(hasher, old), state != Destination.PRESENT, false, overwriteUnindexed, policy.identity(),
+                    policy.routing()));
         }
         return new PlannedRegion(decisions, missing, empty, newer, preserved);
     }
@@ -323,7 +341,7 @@ public final class ChunkImporter {
         }
     }
 
-    private static void requirePlainDirectory(Path path) throws IOException {
+    static void requirePlainDirectory(Path path) throws IOException {
         try {
             var attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
             // NTFS junctions can report both isDirectory and isOther.
@@ -335,7 +353,7 @@ public final class ChunkImporter {
         }
     }
 
-    private static void requirePlainFile(Path path) throws IOException {
+    static void requirePlainFile(Path path) throws IOException {
         if (!Files.notExists(path, LinkOption.NOFOLLOW_LINKS)
                 && !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("not a regular file: " + path);
@@ -408,10 +426,15 @@ public final class ChunkImporter {
     public Path execute(Plan preview, boolean keepBackup) throws IOException {
         if (preview.decisions().isEmpty()) return null;
         Path destination = preview.options().destination().toRealPath();
+        if (!MirrorSavePaths.at(destination).chunkIndex().equals(preview.database())) {
+            throw new IOException("import destination changed before the save was locked; review a fresh plan");
+        }
+        Routing routing = Routing.AUTO;
         if (preview.options().mode() == Mode.MIRROR) {
             // Reject stale metadata before creating session.lock. The plan is still rechecked under the lock.
-            MirrorIdentity expected = preview.decisions().values().iterator().next().getFirst().mirror();
-            if (!Objects.equals(expected, mirrorMetadata(MirrorSavePaths.at(destination).metadata()).identity())) {
+            Decision first = preview.decisions().values().iterator().next().getFirst();
+            routing = first.routing().request();
+            if (!Objects.equals(first.mirror(), mirrorMetadata(MirrorSavePaths.at(destination).metadata()).identity())) {
                 throw new IOException("import plan changed before the save was locked; review a fresh plan");
             }
         }
@@ -421,7 +444,7 @@ public final class ChunkImporter {
                 FileLock lock = channel.tryLock()) {
             if (lock == null) throw new IOException("destination is in use: " + destination);
             // A plan authorizes replacing unindexed chunks only when its preview included such writes.
-            Plan plan = plan(preview.options(), preview.unindexedReplaced() > 0);
+            Plan plan = plan(preview.options(), preview.unindexedReplaced() > 0, routing, destination);
             if (!plan.equals(preview)) {
                 throw new IOException("import plan changed before the save was locked; review a fresh plan");
             }

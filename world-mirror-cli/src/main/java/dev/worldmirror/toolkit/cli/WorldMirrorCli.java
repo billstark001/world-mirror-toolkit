@@ -144,8 +144,14 @@ public final class WorldMirrorCli implements Callable<Integer> {
                 description = "auto, legacy, or namespaced")
         String destinationLayout;
 
+        @Option(names = "--world-graph", description = "World Mirror routing config for the destination")
+        Path worldGraph;
+
+        @Option(names = "--replay-source", description = "confirm a logical source ID for a multi-world replay endpoint")
+        String replaySource;
+
         @Option(names = "--allow-source-mismatch",
-                description = "confirm a replay source that cannot be verified from the mirror metadata")
+                description = "confirm a replay source when routing evidence is unavailable")
         boolean allowSourceMismatch;
 
         @Option(names = "--replace-unindexed", description = "replace nonempty chunks without an index row in mirror timestamp mode")
@@ -176,7 +182,8 @@ public final class WorldMirrorCli implements Callable<Integer> {
             };
             ChunkImporter importer = new ChunkImporter();
             var plan = importer.plan(new ChunkImporter.Options(source, destination, selectedMode,
-                    selectedPolicy, destinationLayout, allowSourceMismatch), replaceUnindexed);
+                    selectedPolicy, destinationLayout, allowSourceMismatch), replaceUnindexed,
+                    new ChunkImporter.Routing(worldGraph, replaySource));
             ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
             System.out.println(mapper.writeValueAsString(plan.asMap()));
             if (dryRun) return 0;

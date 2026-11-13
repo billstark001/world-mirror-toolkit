@@ -35,7 +35,9 @@ The layout follows the Minecraft version: 1.21.11 and earlier use `region`, `DIM
 
 Mirror imports preserve nonempty chunks with no matching index record by default. Use `--replace-unindexed` with the mirror timestamp policy to overwrite those chunks and record their replay capture times. The dry run reports them under `unindexed_replaced`. Indexed nonempty chunks still follow their timestamp and source priority. Both modes can fill missing and physically empty chunks, including biome-only chunks. A zero-byte MCA file is an empty region. `--policy empty-only` limits mirror imports to missing and physically empty chunks. `--policy timestamp` is mirror-only. The destination layout defaults from its own `level.dat`. Use `--destination-layout` to override it.
 
-Mirror mode requires metadata schema 2. Open World Mirror to migrate older metadata before importing. Schema 2 uses a stable world ID and retains `sourceId` as the SQLite namespace. Verify that the replay belongs to the intended mirror and pass `--allow-source-mismatch` to confirm the source manually.
+Mirror mode requires metadata schema 2. Open World Mirror to migrate older metadata before importing. The import uses the destination's stable node ID to verify the target and its `sourceId` to open the SQLite namespace. It checks the replay endpoint against the logical source at the root of the mirror's upstream lineage. When the destination's game routing config is unavailable, pass `--world-graph path/to/world-graph.json`.
+
+If the endpoint has multiple logical worlds, pass `--replay-source remote:…` with the ID of the world the replay actually recorded. The selected source must be an endpoint candidate and match the mirror's upstream root. If routing evidence is unavailable, verify the target manually before using `--allow-source-mismatch`.
 
 Toolkit keeps World Mirror's older on-disk checks in `io.github.billstark001.worldmirror.legacy`. It treats unversioned mirror metadata and zero-byte MCA placeholders as v0. The metadata check directs v0 and v1 saves to the mod for migration.
 

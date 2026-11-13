@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Require World Mirror metadata schema 2 for mirror imports. Migrate older saves in the mod before importing.
+- Require explicit source confirmation for replay imports. Use the destination's stored SQLite namespace for chunk history and recheck its world identity under the save lock.
+
+### Fixed
+
+- Refuse imports while destination recovery is pending or import paths point through symbolic links.
+
 ## [0.1.1] — 2026-11-13
 
 ### Added

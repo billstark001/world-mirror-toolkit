@@ -144,7 +144,8 @@ public final class WorldMirrorCli implements Callable<Integer> {
                 description = "auto, legacy, or namespaced")
         String destinationLayout;
 
-        @Option(names = "--allow-source-mismatch", description = "permit a replay source different from mirror sourceId")
+        @Option(names = "--allow-source-mismatch",
+                description = "confirm a replay source that cannot be verified from the mirror metadata")
         boolean allowSourceMismatch;
 
         @Option(names = "--replace-unindexed", description = "replace nonempty chunks without an index row in mirror timestamp mode")

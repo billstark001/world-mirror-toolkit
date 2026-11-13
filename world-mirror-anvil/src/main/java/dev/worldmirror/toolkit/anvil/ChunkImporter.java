@@ -1,5 +1,7 @@
 package dev.worldmirror.toolkit.anvil;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.worldmirror.toolkit.core.DimensionKey;
@@ -21,6 +23,7 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -57,15 +60,20 @@ public final class ChunkImporter {
     private static final DateTimeFormatter BACKUP_DATE = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
             .withZone(ZoneOffset.UTC);
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final int GRAPH_METADATA_SCHEMA = 2;
+    private static final int MAX_METADATA_BYTES = 16 * 1024 * 1024;
     private final RegionFileStore regions = new RegionFileStore();
 
     public record Options(Path source, Path destination, Mode mode, Policy policy,
             String destinationLayout, boolean allowSourceMismatch) {}
+    private record MirrorIdentity(String sourceId, String nodeId, String parentNodeId,
+            String kind, String role) {}
+    private record MirrorMetadata(ObjectNode document, MirrorIdentity identity, long lastSyncTime) {}
     private record Decision(Path sourceRegion, int slot, ChunkUpdate update, ChunkRecord previousIndex,
             String sourceDigest, String targetDigest, boolean replaceIndexClaim, boolean verifyOnly,
-            boolean replaceUnindexed) {}
+            boolean replaceUnindexed, MirrorIdentity mirror) {}
     private record PlanningPolicy(boolean mirror, WritePolicy writePolicy, boolean replaceUnindexed,
-            int dataVersion, long lastSyncTime) {}
+            int dataVersion, long lastSyncTime, MirrorIdentity identity) {}
     private record PlannedRegion(List<Decision> decisions, int missing, int empty, int newer, int preserved) {}
     private record StagedChunk(Decision decision, RegionFileStore.Slot expected) {}
     public record Plan(Options options, AnalysisExportMetadata sourceMetadata,
@@ -120,6 +128,7 @@ public final class ChunkImporter {
         if (source.equals(destination) || source.startsWith(destination) || destination.startsWith(source)) {
             throw new IOException("source and destination must be separate save trees");
         }
+        requireRecoveredSave(destination);
         AnalysisExportMetadata export = AnalysisExportMetadata.read(source);
         WorldSaveVersion sourceVersion = WorldSaveVersion.read(source);
         if (sourceVersion.dataVersion() != export.dataVersion()) {
@@ -131,16 +140,18 @@ public final class ChunkImporter {
         MirrorSavePaths mirrorPaths = MirrorSavePaths.at(destination);
         String sourceId = null;
         long lastSyncTime = 0;
+        MirrorIdentity mirror = null;
         Path database = mirrorPaths.chunkIndex();
         if (options.mode() == Mode.MIRROR) {
-            ObjectNode metadata = mirrorMetadata(mirrorPaths.metadata());
-            sourceId = metadata.path("sourceId").asText();
-            lastSyncTime = metadata.path("lastSyncTime").asLong(0);
-            if (sourceId.isBlank()) throw new IOException("mirror metadata lacks sourceId");
-            if (!options.allowSourceMismatch() && !sourceId.equalsIgnoreCase(export.sourceKey())) {
-                throw new IOException("replay source " + export.sourceKey() + " differs from mirror " + sourceId
-                        + "; use --allow-source-mismatch only after verifying the target");
+            MirrorMetadata metadata = mirrorMetadata(mirrorPaths.metadata());
+            mirror = metadata.identity();
+            sourceId = mirror.sourceId();
+            lastSyncTime = metadata.lastSyncTime();
+            if (!options.allowSourceMismatch()) {
+                throw new IOException("mirror " + mirror.nodeId() + " has no replay endpoint binding; "
+                        + "use --allow-source-mismatch after verifying the target");
             }
+            requireIndexFiles(database);
         } else if (options.policy() == Policy.TIMESTAMP) {
             throw new IOException("timestamp policy requires --mode mirror and a chunk index");
         }
@@ -151,7 +162,7 @@ public final class ChunkImporter {
             WritePolicy writePolicy = options.policy() == Policy.TIMESTAMP
                     ? WritePolicy.REPLACE_OLDER : WritePolicy.FILL_EMPTY;
             var policy = new PlanningPolicy(options.mode() == Mode.MIRROR, writePolicy, replaceUnindexed,
-                    export.dataVersion(), lastSyncTime);
+                    export.dataVersion(), lastSyncTime, mirror);
             Map<Path, List<Decision>> decisions = new LinkedHashMap<>();
             Set<Path> sourceDirectories = new HashSet<>();
             Set<Path> targetDirectories = new HashSet<>();
@@ -195,6 +206,8 @@ public final class ChunkImporter {
         if (!name.matches()) return null;
         int regionX = regionCoordinate(name.group(1), sourceRegion);
         int regionZ = regionCoordinate(name.group(2), sourceRegion);
+        requirePlainFile(sourceRegion);
+        requirePlainFile(targetRegion);
         List<Decision> decisions = new ArrayList<>();
         int missing = 0, empty = 0, newer = 0, preserved = 0;
         Map<Integer, RegionFileStore.Slot> incoming = regions.read(sourceRegion);
@@ -237,7 +250,7 @@ public final class ChunkImporter {
                 // Recover an interrupted index or metadata commit without rewriting the MCA.
                 String proof = fingerprint(hasher, next);
                 decisions.add(new Decision(sourceRegion, slot, update, record, proof, proof,
-                        !alreadyIndexed && state != Destination.PRESENT, true, false));
+                        !alreadyIndexed && state != Destination.PRESENT, true, false, policy.identity()));
                 continue;
             }
             boolean overwriteUnindexed = state == Destination.PRESENT && record == null && policy.replaceUnindexed();
@@ -253,7 +266,7 @@ public final class ChunkImporter {
                 }
             }
             decisions.add(new Decision(sourceRegion, slot, update, record, fingerprint(hasher, next),
-                    fingerprint(hasher, old), state != Destination.PRESENT, false, overwriteUnindexed));
+                    fingerprint(hasher, old), state != Destination.PRESENT, false, overwriteUnindexed, policy.identity()));
         }
         return new PlannedRegion(decisions, missing, empty, newer, preserved);
     }
@@ -261,11 +274,10 @@ public final class ChunkImporter {
     private static Path regionDirectory(Path world, WorldLayout layout, DimensionKey dimension) throws IOException {
         Path path = layout.dimensionPath(world, dimension).resolve("region").normalize();
         if (!path.startsWith(world)) throw new IOException("region directory leaves its save: " + path);
-        Path ancestor = path;
-        while (Files.notExists(ancestor)) ancestor = ancestor.getParent();
-        Path directory = ancestor.toRealPath().resolve(ancestor.relativize(path));
-        if (!directory.startsWith(world)) throw new IOException("region directory leaves its save: " + path);
-        return directory;
+        for (Path part = path; !part.equals(world); part = part.getParent()) {
+            requirePlainDirectory(part);
+        }
+        return path;
     }
 
     private static int regionCoordinate(String value, Path file) throws IOException {
@@ -296,14 +308,88 @@ public final class ChunkImporter {
         return DriverManager.getConnection("jdbc:sqlite:" + database, readOnly.toProperties());
     }
 
-    private ObjectNode mirrorMetadata(Path file) throws IOException {
-        if (!Files.isRegularFile(file)) throw new IOException("mirror metadata is missing: " + file);
-        if (!(JSON.readTree(file.toFile()) instanceof ObjectNode value)
-                || !MirrorFormat.FORMAT.equals(value.path("format").asText())
-                || value.path("metadataSchema").asInt(-1) != MirrorFormat.METADATA_SCHEMA) {
+    private static void requireRecoveredSave(Path destination) throws IOException {
+        if (!Files.notExists(destination.resolve(".worldmirror-recovery-required"), LinkOption.NOFOLLOW_LINKS)
+                || !Files.notExists(destination.resolve(".worldmirror-relocation.json"), LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("destination requires recovery in World Mirror: " + destination);
+        }
+        try (var journals = Files.newDirectoryStream(destination, ".worldmirror-transaction-*")) {
+            if (journals.iterator().hasNext()) {
+                throw new IOException("destination requires recovery in World Mirror: " + destination);
+            }
+        }
+    }
+
+    private static void requirePlainDirectory(Path path) throws IOException {
+        if (!Files.notExists(path, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("not a plain directory: " + path);
+        }
+    }
+
+    private static void requirePlainFile(Path path) throws IOException {
+        if (!Files.notExists(path, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("not a regular file: " + path);
+        }
+    }
+
+    private static void requireIndexFiles(Path database) throws IOException {
+        requirePlainDirectory(database.getParent());
+        for (String suffix : List.of("", "-wal", "-shm", "-journal")) {
+            requirePlainFile(database.resolveSibling(database.getFileName() + suffix));
+        }
+    }
+
+    private static MirrorMetadata mirrorMetadata(Path file) throws IOException {
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("mirror metadata is missing or is not a regular file: " + file);
+        }
+        byte[] bytes;
+        try (var input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
+            bytes = input.readNBytes(MAX_METADATA_BYTES + 1);
+        }
+        if (bytes.length > MAX_METADATA_BYTES) throw new IOException("mirror metadata exceeds size limit: " + file);
+        if (!(JSON.reader().with(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(bytes) instanceof ObjectNode value)
+                || !MirrorFormat.FORMAT.equals(value.path("format").textValue())) {
             throw new IOException("unsupported mirror metadata format/schema in " + file);
         }
-        return value;
+        var schema = value.path("metadataSchema");
+        if (schema.isMissingNode() || (schema.isIntegralNumber() && schema.canConvertToInt()
+                && schema.intValue() >= 0 && schema.intValue() < GRAPH_METADATA_SCHEMA)) {
+            throw new IOException("upgrade the mirror metadata in World Mirror before importing: " + file);
+        }
+        if (!schema.isIntegralNumber() || !schema.canConvertToInt() || schema.intValue() != GRAPH_METADATA_SCHEMA) {
+            throw new IOException("unsupported mirror metadata format/schema in " + file);
+        }
+        String sourceId = textField(value, "sourceId");
+        if (sourceId == null) throw new IOException("mirror metadata lacks sourceId: " + file);
+        var sync = value.path("lastSyncTime");
+        if (!sync.isIntegralNumber() || !sync.canConvertToLong() || sync.longValue() < 0) {
+            throw new IOException("invalid mirror lastSyncTime: " + file);
+        }
+        String nodeId = textField(value, "nodeId");
+        String parent = textField(value, "parentNodeId");
+        String kind = textField(value, "kind");
+        String role = textField(value, "role");
+        boolean mirror = "MIRROR".equals(kind) && typedId(nodeId, "mirror:")
+                && List.of("mirror:", "snapshot:", "local:", "remote:", "unresolved:").stream()
+                        .anyMatch(prefix -> typedId(parent, prefix))
+                && ("SYNC".equals(role) || "SNAPSHOT".equals(role));
+        boolean snapshot = "SNAPSHOT".equals(kind) && typedId(nodeId, "snapshot:") && "SNAPSHOT".equals(role)
+                && (!value.has("parentNodeId") || value.path("parentNodeId").isNull());
+        if (!mirror && !snapshot) throw new IOException("invalid mirror graph identity: " + file);
+        return new MirrorMetadata(value, new MirrorIdentity(sourceId, nodeId, parent, kind, role), sync.longValue());
+    }
+
+    private static String textField(ObjectNode document, String name) {
+        String value = document.path(name).textValue();
+        return value == null || value.isBlank() || value.chars().anyMatch(Character::isISOControl) ? null : value;
+    }
+
+    private static boolean typedId(String id, String prefix) {
+        return id != null && id.startsWith(prefix) && !id.substring(prefix.length()).isBlank();
     }
 
     /** Execute with a retained backup of the affected save files. */
@@ -315,8 +401,16 @@ public final class ChunkImporter {
     public Path execute(Plan preview, boolean keepBackup) throws IOException {
         if (preview.decisions().isEmpty()) return null;
         Path destination = preview.options().destination().toRealPath();
+        if (preview.options().mode() == Mode.MIRROR) {
+            // Reject stale metadata before creating session.lock. The plan is still rechecked under the lock.
+            MirrorIdentity expected = preview.decisions().values().iterator().next().getFirst().mirror();
+            if (!Objects.equals(expected, mirrorMetadata(MirrorSavePaths.at(destination).metadata()).identity())) {
+                throw new IOException("import plan changed before the save was locked; review a fresh plan");
+            }
+        }
         Path lockPath = destination.resolve("session.lock");
-        try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+                        LinkOption.NOFOLLOW_LINKS);
                 FileLock lock = channel.tryLock()) {
             if (lock == null) throw new IOException("destination is in use: " + destination);
             // A plan authorizes replacing unindexed chunks only when its preview included such writes.
@@ -348,7 +442,10 @@ public final class ChunkImporter {
                         System.out.println("imported " + target + " chunks=" + result.written().size());
                     }
                 }
-                if (index != null) updateMirrorLastSync(MirrorSavePaths.at(destination).metadata(), newestImported);
+                if (index != null) {
+                    MirrorIdentity mirror = plan.decisions().values().iterator().next().getFirst().mirror();
+                    updateMirrorLastSync(MirrorSavePaths.at(destination).metadata(), mirror, newestImported);
+                }
             } catch (SQLException | IOException | RuntimeException failure) {
                 String detail = backup == null ? "import failed: " : "import failed; backup at " + backup.path() + ": ";
                 throw new IOException(detail + failure.getMessage(), failure);
@@ -370,6 +467,7 @@ public final class ChunkImporter {
 
     private static Backup createBackup(Plan plan, Path destination) throws IOException {
         Path backups = destination.resolve("backups");
+        requirePlainDirectory(backups);
         Files.createDirectories(backups);
         Path path = Files.createTempDirectory(backups, "toolkit-import-" + BACKUP_DATE.format(Instant.now()) + "-");
         Map<Path, Path> originals = new HashMap<>();
@@ -417,6 +515,7 @@ public final class ChunkImporter {
 
     private Connection openIndex(Plan plan) throws IOException, SQLException {
         if (plan.options().mode() != Mode.MIRROR) return null;
+        requireIndexFiles(plan.database());
         Files.createDirectories(plan.database().getParent());
         Connection db = DriverManager.getConnection("jdbc:sqlite:" + plan.database());
         try {
@@ -429,6 +528,8 @@ public final class ChunkImporter {
     }
 
     private Map<Integer, StagedChunk> writeRegion(Path target, List<Decision> decisions) throws IOException {
+        requirePlainFile(target);
+        requirePlainFile(decisions.getFirst().sourceRegion());
         Map<Integer, RegionFileStore.Slot> slots = regions.read(target);
         Map<Integer, RegionFileStore.Slot> source = regions.read(decisions.getFirst().sourceRegion());
         Map<Integer, StagedChunk> staged = new LinkedHashMap<>();
@@ -542,9 +643,12 @@ public final class ChunkImporter {
         return true;
     }
 
-    private void updateMirrorLastSync(Path metadataPath, long newestImported) throws IOException {
-        ObjectNode metadata = mirrorMetadata(metadataPath);
-        metadata.put("lastSyncTime", Math.max(metadata.path("lastSyncTime").asLong(0), newestImported));
+    private static void updateMirrorLastSync(Path metadataPath, MirrorIdentity expected, long newestImported)
+            throws IOException {
+        MirrorMetadata read = mirrorMetadata(metadataPath);
+        if (!expected.equals(read.identity())) throw new IOException("mirror identity changed during import: " + metadataPath);
+        ObjectNode metadata = read.document();
+        metadata.put("lastSyncTime", Math.max(read.lastSyncTime(), newestImported));
         Path temporary = Files.createTempFile(metadataPath.getParent(), "worldmirror_meta-", ".tmp");
         try {
             JSON.writerWithDefaultPrettyPrinter().writeValue(temporary.toFile(), metadata);

@@ -90,11 +90,9 @@ class ChunkImporterTest {
         Files.writeString(metadata, "{\"format\":\"worldmirror\",\"metadataSchema\":99,"
                 + "\"sourceId\":\"" + SOURCE + "\"}");
         ChunkImporter importer = new ChunkImporter();
-        var options = new ChunkImporter.Options(source, destination, ChunkImporter.Mode.MIRROR,
-                ChunkImporter.Policy.TIMESTAMP, "auto", false);
+        var options = mirrorOptions(source, destination);
         assertThrows(IOException.class, () -> importer.plan(options));
-        Files.writeString(metadata, "{\"format\":\"worldmirror\",\"metadataSchema\":1,"
-                + "\"sourceId\":\"" + SOURCE + "\",\"lastSyncTime\":0}");
+        writeMirrorMetadata(destination);
         var unknown = importer.plan(options);
         assertEquals(0, unknown.newerReplaced());
         assertEquals(1, unknown.preserved());
@@ -119,6 +117,150 @@ class ChunkImporterTest {
             assertEquals("replay_import", updates.getFirst().updateSource());
         }
         assertEquals(0, importer.plan(options).chunksToWrite());
+    }
+
+    @Test
+    void oldMirrorMetadataMustBeMigratedByWorldMirrorBeforeImporting() throws Exception {
+        Path source = source();
+        Path destination = destination();
+        writeRegion(source, Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:stone", CAPTURE)));
+        writeMirrorMetadata(destination);
+        var importer = new ChunkImporter();
+        var options = mirrorOptions(source, destination);
+        var preview = importer.plan(options);
+        Path metadata = destination.resolve("worldmirror_meta.json");
+        byte[] legacy = """
+                {"format":"worldmirror","metadataSchema":1,"sourceId":"server:example.test","lastSyncTime":0}
+                """.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Files.write(metadata, legacy);
+
+        assertTrue(assertThrows(IOException.class, () -> importer.plan(options))
+                .getMessage().contains("upgrade the mirror metadata in World Mirror"));
+        assertArrayEquals(legacy, Files.readAllBytes(metadata));
+        assertTrue(Files.notExists(destination.resolve("session.lock")));
+        assertTrue(assertThrows(IOException.class, () -> importer.execute(preview, false))
+                .getMessage().contains("upgrade the mirror metadata in World Mirror"));
+        assertArrayEquals(legacy, Files.readAllBytes(metadata));
+        assertTrue(Files.notExists(destination.resolve("session.lock")));
+        assertTrue(Files.notExists(region(destination)));
+        assertTrue(Files.notExists(preview.database()));
+        assertTrue(Files.notExists(destination.resolve("backups")));
+    }
+
+    @Test
+    void graphMetadataRequiresExplicitSourceVerificationAndUsesTheExistingIndexNamespace() throws Exception {
+        Path source = source();
+        Path destination = destination();
+        writeRegion(source, Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:stone", CAPTURE)));
+        Path metadata = destination.resolve("worldmirror_meta.json");
+        writeGraphMetadata(destination, "mirror:first", SOURCE);
+        var importer = new ChunkImporter();
+        var unverified = new ChunkImporter.Options(source, destination, ChunkImporter.Mode.MIRROR,
+                ChunkImporter.Policy.TIMESTAMP, "auto", false);
+        assertTrue(assertThrows(IOException.class, () -> importer.plan(unverified))
+                .getMessage().contains("--allow-source-mismatch"));
+
+        String indexSource = "server:former.example.test";
+        writeGraphMetadata(destination, "mirror:first", indexSource);
+        String original = Files.readString(metadata);
+        var options = new ChunkImporter.Options(source, destination, ChunkImporter.Mode.MIRROR,
+                ChunkImporter.Policy.TIMESTAMP, "auto", true);
+        var plan = importer.plan(options);
+        assertEquals(indexSource, plan.sourceId());
+        assertEquals(original, Files.readString(metadata));
+        importer.execute(plan, false);
+
+        var saved = new com.fasterxml.jackson.databind.ObjectMapper().readTree(metadata.toFile());
+        assertEquals(2, saved.path("metadataSchema").intValue());
+        assertEquals("mirror:first", saved.path("nodeId").textValue());
+        assertEquals("remote:logical-source", saved.path("parentNodeId").textValue());
+        assertEquals(CAPTURE, saved.path("lastSyncTime").longValue());
+        assertEquals("VOID", saved.path("generation").path("mode").textValue());
+        try (var connection = openIndex(destination)) {
+            assertEquals(List.of(new ChunkIndexStore.ChunkRecord(0, 0, CAPTURE, "replay_import")),
+                    new ChunkIndexStore(connection, indexSource).queryAll("minecraft:overworld"));
+            assertTrue(new ChunkIndexStore(connection, SOURCE).queryAll("minecraft:overworld").isEmpty());
+        }
+    }
+
+    @Test
+    void rejectsChangedGraphNodeEvenWhenPathIndexAndTerrainStillMatchThePreview() throws Exception {
+        Path source = source();
+        Path destination = destination();
+        writeRegion(source, Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:stone", CAPTURE)));
+        writeGraphMetadata(destination, "mirror:first", SOURCE);
+        var importer = new ChunkImporter();
+        var options = new ChunkImporter.Options(source, destination, ChunkImporter.Mode.MIRROR,
+                ChunkImporter.Policy.TIMESTAMP, "auto", true);
+        var plan = importer.plan(options);
+        writeGraphMetadata(destination, "mirror:second", SOURCE);
+
+        assertTrue(assertThrows(IOException.class, () -> importer.execute(plan, false))
+                .getMessage().contains("import plan changed"));
+        assertTrue(Files.notExists(region(destination)));
+        assertTrue(Files.notExists(plan.database()));
+    }
+
+    @Test
+    void refusesTrailingJsonAfterValidMirrorMetadata() throws Exception {
+        Path source = source();
+        Path destination = destination();
+        writeMirrorMetadata(destination);
+        Path metadata = destination.resolve("worldmirror_meta.json");
+        String invalid = Files.readString(metadata) + "{\"unexpected\":true}";
+        Files.writeString(metadata, invalid);
+
+        assertThrows(IOException.class, () -> new ChunkImporter().plan(mirrorOptions(source, destination)));
+        assertEquals(invalid, Files.readString(metadata));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {".worldmirror-recovery-required", ".worldmirror-relocation.json",
+            ".worldmirror-transaction-test"})
+    void requiresRecoveryForAnInterruptedWorldMirrorOperation(String journal) throws Exception {
+        Path source = source();
+        Path destination = destination();
+        writeRegion(source, Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:stone", CAPTURE)));
+        writeMirrorMetadata(destination);
+        var importer = new ChunkImporter();
+        var options = mirrorOptions(source, destination);
+        var preview = importer.plan(options);
+        Files.createFile(destination.resolve(journal));
+
+        assertTrue(assertThrows(IOException.class, () -> importer.plan(options))
+                .getMessage().contains("requires recovery in World Mirror"));
+        assertTrue(assertThrows(IOException.class, () -> importer.execute(preview, false))
+                .getMessage().contains("requires recovery in World Mirror"));
+        assertTrue(Files.notExists(region(destination)));
+        assertTrue(Files.notExists(preview.database()));
+    }
+
+    @Test
+    void rejectsSymbolicIndexDirectoryAndSessionLock() throws Exception {
+        Path source = source();
+        Path destination = destination();
+        writeRegion(source, Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:stone", CAPTURE)));
+        writeMirrorMetadata(destination);
+        Path outside = Files.createDirectory(temporary.resolve("outside"));
+        Path indexDirectory = destination.resolve("data");
+        Path lockTarget = Files.writeString(outside.resolve("lock-target"), "untouched");
+        try {
+            Files.createSymbolicLink(indexDirectory, outside);
+            Files.createSymbolicLink(destination.resolve("session.lock"), lockTarget);
+        } catch (IOException | UnsupportedOperationException unavailable) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false, "Symbolic links unavailable: " + unavailable);
+        }
+
+        var importer = new ChunkImporter();
+        var options = mirrorOptions(source, destination);
+        assertTrue(assertThrows(IOException.class, () -> importer.plan(options))
+                .getMessage().contains("not a plain directory"));
+        Files.delete(indexDirectory);
+        var plan = importer.plan(options);
+        assertThrows(IOException.class, () -> importer.execute(plan, false));
+        assertEquals("untouched", Files.readString(lockTarget));
+        assertTrue(Files.notExists(outside.resolve("world_mirror.sqlite")));
+        assertTrue(Files.notExists(region(destination)));
     }
 
     @Test
@@ -147,7 +289,7 @@ class ChunkImporterTest {
         var options = mirrorOptions(source, destination);
         assertEquals(0, importer.plan(options).chunksToWrite());
         assertThrows(IOException.class, () -> importer.plan(new ChunkImporter.Options(source, destination,
-                ChunkImporter.Mode.MIRROR, ChunkImporter.Policy.EMPTY_ONLY, "auto", false), true));
+                ChunkImporter.Mode.MIRROR, ChunkImporter.Policy.EMPTY_ONLY, "auto", true), true));
         var preview = importer.plan(options, true);
         assertEquals(1, preview.chunksToWrite());
         assertEquals(1, preview.unindexedReplaced());
@@ -335,12 +477,19 @@ class ChunkImporterTest {
 
     private static ChunkImporter.Options mirrorOptions(Path source, Path destination) {
         return new ChunkImporter.Options(source, destination, ChunkImporter.Mode.MIRROR,
-                ChunkImporter.Policy.TIMESTAMP, "auto", false);
+                ChunkImporter.Policy.TIMESTAMP, "auto", true);
     }
 
     private static void writeMirrorMetadata(Path destination) throws IOException {
-        Files.writeString(destination.resolve("worldmirror_meta.json"), "{\"format\":\"worldmirror\","
-                + "\"metadataSchema\":1,\"sourceId\":\"" + SOURCE + "\",\"lastSyncTime\":0}");
+        writeGraphMetadata(destination, "mirror:test", SOURCE);
+    }
+
+    private static void writeGraphMetadata(Path destination, String nodeId, String indexSource) throws IOException {
+        Files.writeString(destination.resolve("worldmirror_meta.json"), """
+                {"format":"worldmirror","metadataSchema":2,"nodeId":"%s","parentNodeId":"remote:logical-source",
+                 "kind":"MIRROR","role":"SYNC","sourceId":"%s","lastSyncTime":0,
+                 "generation":{"mode":"VOID","revision":1,"assetRevision":3,"dataVersion":4903,"cleanupRevision":1}}
+                """.formatted(nodeId, indexSource));
     }
 
     private static Connection openIndex(Path destination) throws IOException, SQLException {

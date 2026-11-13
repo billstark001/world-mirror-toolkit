@@ -1,5 +1,6 @@
 package dev.worldmirror.toolkit.anvil;
 
+import io.github.billstark001.worldmirror.legacy.LegacyRegionPlaceholder;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -26,7 +27,7 @@ final class RegionFileStore {
         if (!Files.exists(path)) return slots;
         try (RandomAccessFile file = new RandomAccessFile(path.toFile(), "r")) {
             long lengthOnDisk = file.length();
-            if (lengthOnDisk == 0) return slots;
+            if (LegacyRegionPlaceholder.isEmpty(lengthOnDisk)) return slots;
             if (lengthOnDisk < SECTOR * 2) throw new IOException("truncated region header: " + path);
             byte[] header = new byte[SECTOR * 2];
             file.readFully(header);

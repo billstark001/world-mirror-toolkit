@@ -17,6 +17,7 @@ import io.github.billstark001.worldmirror.format.ChunkUpdatePolicy.Destination;
 import io.github.billstark001.worldmirror.format.ChunkUpdatePolicy.IndexStatus;
 import io.github.billstark001.worldmirror.format.ChunkUpdatePolicy.WritePolicy;
 import io.github.billstark001.worldmirror.format.MirrorFormat;
+import io.github.billstark001.worldmirror.legacy.LegacyMirrorMetadata;
 import io.github.billstark001.worldmirror.merge.RegionMerge;
 import org.sqlite.SQLiteConfig;
 import java.io.IOException;
@@ -363,8 +364,7 @@ public final class ChunkImporter {
             throw new IOException("unsupported mirror metadata format/schema in " + file);
         }
         var schema = value.path("metadataSchema");
-        if (schema.isMissingNode() || (schema.isIntegralNumber() && schema.canConvertToInt()
-                && schema.intValue() >= 0 && schema.intValue() < GRAPH_METADATA_SCHEMA)) {
+        if (LegacyMirrorMetadata.requiresMigration(schema)) {
             throw new IOException("upgrade the mirror metadata in World Mirror before importing: " + file);
         }
         if (!schema.isIntegralNumber() || !schema.canConvertToInt() || schema.intValue() != GRAPH_METADATA_SCHEMA) {

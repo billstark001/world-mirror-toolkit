@@ -145,7 +145,7 @@ public final class ByteCursor {
     }
 
     private void require(int length, String what) {
-        if (offset + length > data.length) {
+        if (length > remaining()) {
             throw new ParseException("truncated " + what + " at offset " + offset + ", need " + length
                     + " bytes, remaining " + remaining());
         }

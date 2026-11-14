@@ -19,6 +19,7 @@ import java.util.zip.InflaterInputStream;
 /** Reads and rewrites MCA slots while preserving untouched chunk payloads verbatim. */
 final class RegionFileStore {
     private static final int SECTOR = 4096;
+    private static final int MAX_CHUNK_NBT_BYTES = 64 * 1024 * 1024;
     private final PortableNbtParser parser = new PortableNbtParser();
 
     record Slot(byte[] payload, int timestampSeconds) {}
@@ -97,9 +98,8 @@ final class RegionFileStore {
             case 3 -> raw;
             default -> throw new IOException("unsupported MCA compression " + codec);
         };
-        try (decoded; ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
-            decoded.transferTo(bytes);
-            return parser.parseDiskRoot(bytes.toByteArray());
+        try (decoded) {
+            return parser.parseDiskRoot(decoded, MAX_CHUNK_NBT_BYTES);
         } catch (RuntimeException invalid) {
             throw new IOException("invalid chunk NBT", invalid);
         }

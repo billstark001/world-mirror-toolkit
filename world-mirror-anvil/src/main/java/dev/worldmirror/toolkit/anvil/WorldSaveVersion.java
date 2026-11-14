@@ -7,10 +7,12 @@ import java.util.zip.GZIPInputStream;
 
 /** Version declared by a Minecraft level.dat, independent of World Mirror metadata. */
 public record WorldSaveVersion(String minecraftVersion, int dataVersion) {
+    private static final int MAX_WORLD_NBT_BYTES = 128 * 1024 * 1024;
+
     public static WorldSaveVersion read(Path root) throws IOException {
         Path file = root.resolve("level.dat");
         try (GZIPInputStream in = new GZIPInputStream(Files.newInputStream(file))) {
-            NbtValue.CompoundValue nbt = new PortableNbtParser().parseDiskRoot(in.readAllBytes());
+            NbtValue.CompoundValue nbt = new PortableNbtParser().parseDiskRoot(in, MAX_WORLD_NBT_BYTES);
             if (!(nbt.values().get("Data") instanceof NbtValue.CompoundValue data)) {
                 throw new IOException("level.dat has no Data compound: " + file);
             }

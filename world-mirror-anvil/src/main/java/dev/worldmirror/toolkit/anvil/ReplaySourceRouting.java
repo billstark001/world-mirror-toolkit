@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.billstark001.worldmirror.format.WorldGraphLease;
 import io.github.billstark001.worldmirror.format.WorldLineage;
+import io.github.billstark001.worldmirror.legacy.LegacyRoutingRecovery;
 import java.io.IOException;
 import java.net.IDN;
 import java.net.InetAddress;
@@ -230,10 +231,7 @@ final class ReplaySourceRouting {
     }
 
     private static Path findNativeGraph(Path directory) throws IOException {
-        if (!Files.notExists(
-                    directory.resolve(".world-graph-local-adoption.json"), LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException("world graph requires recovery in World Mirror: " + directory);
-        }
+        LegacyRoutingRecovery.requireCompletedAdoptions(directory);
         requireRecoveredConfig(directory);
         Path file = directory.resolve("world-graph.json");
         ImportSavePaths.requirePlainFile(file);

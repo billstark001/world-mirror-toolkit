@@ -17,10 +17,12 @@ import java.util.Objects;
 
 /** Downloads and prepares launcher metadata, client jars, and libraries from Mojang metadata. */
 public final class MojangVersionAssets {
-    public static final String VERSION_MANIFEST_V2 = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+    public static final String VERSION_MANIFEST_V2 =
+            "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
+    private final HttpClient httpClient =
+            HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
 
     public PreparedAssets prepare(Options options) throws IOException, InterruptedException {
         Objects.requireNonNull(options, "options");
@@ -35,10 +37,12 @@ public final class MojangVersionAssets {
             clientJar = downloadClientJar(version, options.workDir());
         }
         List<Path> libraries = downloadLibraries(version, options.workDir().resolve("libraries"));
-        return new PreparedAssets(version.path("id").asText(options.minecraftVersion()), versionJson, clientJar, libraries, version);
+        return new PreparedAssets(version.path("id").asText(options.minecraftVersion()), versionJson,
+                clientJar, libraries, version);
     }
 
-    private Path resolveVersionJson(String minecraftVersion, Path workDir) throws IOException, InterruptedException {
+    private Path resolveVersionJson(String minecraftVersion, Path workDir)
+            throws IOException, InterruptedException {
         if (minecraftVersion == null || minecraftVersion.isBlank()) {
             throw new ToolkitException("minecraft version is required when --version-json is not provided");
         }
@@ -65,7 +69,8 @@ public final class MojangVersionAssets {
         return out;
     }
 
-    private List<Path> downloadLibraries(JsonNode version, Path libraryDir) throws IOException, InterruptedException {
+    private List<Path> downloadLibraries(JsonNode version, Path libraryDir)
+            throws IOException, InterruptedException {
         Files.createDirectories(libraryDir);
         List<Path> out = new ArrayList<>();
         for (JsonNode library : version.path("libraries")) {
@@ -87,7 +92,8 @@ public final class MojangVersionAssets {
             return;
         }
         HttpRequest request = HttpRequest.newBuilder(uri).GET().build();
-        HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        HttpResponse<InputStream> response =
+                httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IOException("download failed " + response.statusCode() + " " + uri);
         }
@@ -102,5 +108,6 @@ public final class MojangVersionAssets {
         }
     }
 
-    public record PreparedAssets(String versionId, Path versionJson, Path clientJar, List<Path> libraries, JsonNode versionJsonNode) {}
+    public record PreparedAssets(String versionId, Path versionJson, Path clientJar, List<Path> libraries,
+            JsonNode versionJsonNode) {}
 }

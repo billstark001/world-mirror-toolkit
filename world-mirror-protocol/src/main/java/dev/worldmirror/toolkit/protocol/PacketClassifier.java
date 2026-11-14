@@ -17,6 +17,7 @@ public final class PacketClassifier {
     public Optional<PacketClassification> classify(byte[] rawPacketPayload, PacketState state) {
         int id = VarInts.leadingValue(rawPacketPayload);
         int length = VarInts.leadingSize(rawPacketPayload);
-        return schema.findByPacketId(state, id).map(descriptor -> new PacketClassification(id, length, descriptor));
+        return schema.findByPacketId(state, id).map(
+                descriptor -> new PacketClassification(id, length, descriptor));
     }
 }

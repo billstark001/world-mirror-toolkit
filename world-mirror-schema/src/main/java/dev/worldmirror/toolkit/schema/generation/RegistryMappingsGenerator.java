@@ -36,9 +36,12 @@ public final class RegistryMappingsGenerator {
             classpath.forEach(path -> names.add(path.getFileName().toString()));
             for (String line : Files.readAllLines(options.fabricClasspathFile())) {
                 String entry = line.trim();
-                if (!entry.endsWith(".jar") || !(entry.contains("net.fabricmc.fabric-api") || entry.contains("fabric-loader"))) continue;
+                if (!entry.endsWith(".jar")
+                        || !(entry.contains("net.fabricmc.fabric-api") || entry.contains("fabric-loader")))
+                    continue;
                 Path jar = Path.of(entry);
-                if (Files.isRegularFile(jar) && names.add(jar.getFileName().toString())) classpath.add(jar);
+                if (Files.isRegularFile(jar) && names.add(jar.getFileName().toString()))
+                    classpath.add(jar);
             }
         }
 
@@ -47,18 +50,18 @@ public final class RegistryMappingsGenerator {
             try {
                 Path sourcePath = workDir.resolve("DumpRegistryMappings.java");
                 Files.writeString(sourcePath, source.source(), StandardCharsets.UTF_8);
-                run(List.of(javaTool(options.javaHome(), "javac"), "-encoding", "UTF-8", "-cp", classpath(classpath), sourcePath.toString()), workDir);
-                ProcessResult result = run(List.of(javaTool(options.javaHome(), "java"), "-cp", classpath(append(classpath, workDir)), "DumpRegistryMappings"), workDir);
+                run(List.of(javaTool(options.javaHome(), "javac"), "-encoding", "UTF-8", "-cp",
+                            classpath(classpath), sourcePath.toString()),
+                        workDir);
+                ProcessResult result =
+                        run(List.of(javaTool(options.javaHome(), "java"), "-cp",
+                                    classpath(append(classpath, workDir)), "DumpRegistryMappings"),
+                                workDir);
                 JsonNode generated = parseGeneratedJson(result.stdout());
                 mapper.writeValue(output.toFile(), generated);
-                return new Result(
-                        output,
-                        prepared.versionId(),
-                        generated.path("data_version").asInt(),
-                        generated.path("block_states").size(),
-                        generated.path("block_entity_types").size(),
-                        generated.path("biomes").size(),
-                        source.name());
+                return new Result(output, prepared.versionId(), generated.path("data_version").asInt(),
+                        generated.path("block_states").size(), generated.path("block_entity_types").size(),
+                        generated.path("biomes").size(), source.name());
             } catch (ToolkitException ex) {
                 lastFailure = ex;
             }
@@ -85,15 +88,17 @@ public final class RegistryMappingsGenerator {
         return mapper.readTree(json);
     }
 
-    private ProcessResult run(List<String> command, Path workingDirectory) throws IOException, InterruptedException {
+    private ProcessResult run(List<String> command, Path workingDirectory)
+            throws IOException, InterruptedException {
         Process process = new ProcessBuilder(command)
-                .directory(workingDirectory.toFile())
-                .redirectErrorStream(true)
-                .start();
+                                  .directory(workingDirectory.toFile())
+                                  .redirectErrorStream(true)
+                                  .start();
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         int exit = process.waitFor();
         if (exit != 0) {
-            throw new ToolkitException("command failed (" + exit + "): " + String.join(" ", command) + "\n" + output);
+            throw new ToolkitException(
+                    "command failed (" + exit + "): " + String.join(" ", command) + "\n" + output);
         }
         return new ProcessResult(output);
     }
@@ -112,14 +117,16 @@ public final class RegistryMappingsGenerator {
         if (javaHome == null) {
             return executable;
         }
-        String file = System.getProperty("os.name").toLowerCase().contains("win") ? executable + ".exe" : executable;
+        String file = System.getProperty("os.name").toLowerCase().contains("win") ? executable + ".exe"
+                                                                                  : executable;
         return javaHome.resolve("bin").resolve(file).toString();
     }
 
-    public record Options(String minecraftVersion, Path versionJson, Path clientJar, Path workDir, Path out, Path javaHome,
-            List<Path> extraJars, Path fabricClasspathFile) {}
+    public record Options(String minecraftVersion, Path versionJson, Path clientJar, Path workDir, Path out,
+            Path javaHome, List<Path> extraJars, Path fabricClasspathFile) {}
 
-    public record Result(Path out, String versionId, int dataVersion, int blockStates, int blockEntityTypes, int biomes, String dumperVariant) {
+    public record Result(Path out, String versionId, int dataVersion, int blockStates, int blockEntityTypes,
+            int biomes, String dumperVariant) {
         public Map<String, Object> asMap() {
             Map<String, Object> outMap = new LinkedHashMap<>();
             outMap.put("out", out.toString());
@@ -137,7 +144,8 @@ public final class RegistryMappingsGenerator {
 
     private record DumperSource(String name, String source) {
         static List<DumperSource> variants() {
-            return List.of(new DumperSource("named-identifier-26.1.2", IDENTIFIER_SOURCE), new DumperSource("named-resource-location", RESOURCE_LOCATION_SOURCE));
+            return List.of(new DumperSource("named-identifier-26.1.2", IDENTIFIER_SOURCE),
+                    new DumperSource("named-resource-location", RESOURCE_LOCATION_SOURCE));
         }
     }
 
@@ -227,8 +235,10 @@ public final class RegistryMappingsGenerator {
             }
             """;
 
-    private static final String RESOURCE_LOCATION_SOURCE = IDENTIFIER_SOURCE
-            .replace("import net.minecraft.resources.Identifier;", "import net.minecraft.resources.ResourceLocation;")
-            .replace("Identifier key", "ResourceLocation key")
-            .replace("Identifier blockName", "ResourceLocation blockName");
+    private static final String RESOURCE_LOCATION_SOURCE =
+            IDENTIFIER_SOURCE
+                    .replace("import net.minecraft.resources.Identifier;",
+                            "import net.minecraft.resources.ResourceLocation;")
+                    .replace("Identifier key", "ResourceLocation key")
+                    .replace("Identifier blockName", "ResourceLocation blockName");
 }

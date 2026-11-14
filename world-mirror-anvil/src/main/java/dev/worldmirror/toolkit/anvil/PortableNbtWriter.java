@@ -65,7 +65,8 @@ public final class PortableNbtWriter {
                 out.writeInt(v.values().size());
                 for (NbtValue item : v.values()) {
                     if (item.tagId() != v.elementType()) {
-                        throw new ParseException("NBT list element type mismatch: expected " + v.elementType() + ", got " + item.tagId());
+                        throw new ParseException("NBT list element type mismatch: expected " + v.elementType()
+                                + ", got " + item.tagId());
                     }
                     writePayload(out, item);
                 }

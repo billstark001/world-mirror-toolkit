@@ -26,11 +26,8 @@ public final class QuerzNbtBridge {
     }
 
     private Optional<String> detect() {
-        String[] probes = {
-                "net.querz.nbt.tag.CompoundTag",
-                "io.github.ensgijs.nbt.tag.CompoundTag",
-                "io.github.ens_gijs.nbt.tag.CompoundTag"
-        };
+        String[] probes = {"net.querz.nbt.tag.CompoundTag", "io.github.ensgijs.nbt.tag.CompoundTag",
+                "io.github.ens_gijs.nbt.tag.CompoundTag"};
         ClassLoader loader = Thread.currentThread().getContextClassLoader();
         for (String probe : probes) {
             try {

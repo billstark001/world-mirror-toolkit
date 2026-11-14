@@ -17,7 +17,8 @@ public final class RegistryMappings {
     private final Map<Integer, BlockState> blockStates;
     private final Map<Integer, String> blockEntityTypes;
 
-    private RegistryMappings(int dataVersion, Map<Integer, BlockState> blockStates, Map<Integer, String> blockEntityTypes) {
+    private RegistryMappings(
+            int dataVersion, Map<Integer, BlockState> blockStates, Map<Integer, String> blockEntityTypes) {
         this.dataVersion = dataVersion;
         this.blockStates = Map.copyOf(blockStates);
         this.blockEntityTypes = Map.copyOf(blockEntityTypes);
@@ -32,7 +33,8 @@ public final class RegistryMappings {
     public static RegistryMappings loadBundled(String minecraftVersion) throws IOException {
         String resource = "registries/registries_" + minecraftVersion + ".json.gz";
         InputStream stream = RegistryMappings.class.getClassLoader().getResourceAsStream(resource);
-        if (stream == null) throw new ParseException("no bundled registry mappings for " + minecraftVersion);
+        if (stream == null)
+            throw new ParseException("no bundled registry mappings for " + minecraftVersion);
         try (InputStream inflated = new GZIPInputStream(stream)) {
             return load(inflated);
         }
@@ -45,13 +47,18 @@ public final class RegistryMappings {
         states.fieldNames().forEachRemaining(key -> {
             JsonNode node = states.path(key);
             Map<String, String> properties = new LinkedHashMap<>();
-            node.path("Properties").fields().forEachRemaining(entry -> properties.put(entry.getKey(), entry.getValue().asText()));
-            blockStates.put(Integer.parseInt(key), new BlockState(node.path("Name").asText("minecraft:air"), properties));
+            node.path("Properties")
+                    .fields()
+                    .forEachRemaining(entry -> properties.put(entry.getKey(), entry.getValue().asText()));
+            blockStates.put(Integer.parseInt(key),
+                    new BlockState(node.path("Name").asText("minecraft:air"), properties));
         });
         Map<Integer, String> blockEntityTypes = new LinkedHashMap<>();
         JsonNode entityTypes = root.path("block_entity_types");
-        entityTypes.fieldNames().forEachRemaining(key -> blockEntityTypes.put(Integer.parseInt(key), entityTypes.path(key).asText()));
-        if (!root.has("data_version")) throw new ParseException("registry mappings lack data_version");
+        entityTypes.fieldNames().forEachRemaining(
+                key -> blockEntityTypes.put(Integer.parseInt(key), entityTypes.path(key).asText()));
+        if (!root.has("data_version"))
+            throw new ParseException("registry mappings lack data_version");
         return new RegistryMappings(root.path("data_version").asInt(), blockStates, blockEntityTypes);
     }
 
@@ -77,7 +84,8 @@ public final class RegistryMappings {
 
     public String blockEntityType(int typeId) {
         String name = blockEntityTypes.get(typeId);
-        if (name == null) throw new ParseException("unknown block entity registry id " + typeId);
+        if (name == null)
+            throw new ParseException("unknown block entity registry id " + typeId);
         return name;
     }
 
@@ -89,10 +97,10 @@ public final class RegistryMappings {
 
     private BlockState requireBlockState(int id) {
         BlockState state = blockStates.get(id);
-        if (state == null) throw new ParseException("unknown block state registry id " + id);
+        if (state == null)
+            throw new ParseException("unknown block state registry id " + id);
         return state;
     }
 
-    private record BlockState(String name, Map<String, String> properties) {
-    }
+    private record BlockState(String name, Map<String, String> properties) {}
 }

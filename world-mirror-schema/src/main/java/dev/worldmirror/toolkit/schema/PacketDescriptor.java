@@ -3,14 +3,8 @@ package dev.worldmirror.toolkit.schema;
 import java.util.Objects;
 
 /** Versioned packet identity. */
-public record PacketDescriptor(
-        PacketState state,
-        String direction,
-        int id,
-        String name,
-        PacketKind kind,
-        String parser,
-        String confidence) {
+public record PacketDescriptor(PacketState state, String direction, int id, String name, PacketKind kind,
+        String parser, String confidence) {
     public PacketDescriptor {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(direction, "direction");

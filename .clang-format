@@ -1,0 +1,9 @@
+Language: Java
+BasedOnStyle: Google
+IndentWidth: 4
+ContinuationIndentWidth: 8
+ColumnLimit: 110
+SortIncludes: Never
+LineEnding: LF
+BreakStringLiterals: false
+ReflowComments: Never

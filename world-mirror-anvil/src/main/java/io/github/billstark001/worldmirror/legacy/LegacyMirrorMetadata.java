@@ -11,8 +11,10 @@ public final class LegacyMirrorMetadata {
 
     /** The caller has already verified that the file declares the World Mirror format. */
     public static boolean requiresMigration(JsonNode schema) {
-        if (schema.isMissingNode()) return true;
-        if (!schema.isIntegralNumber() || !schema.canConvertToInt()) return false;
+        if (schema.isMissingNode())
+            return true;
+        if (!schema.isIntegralNumber() || !schema.canConvertToInt())
+            return false;
         int version = schema.intValue();
         return version == UNVERSIONED_SCHEMA || version == FIRST_VERSIONED_SCHEMA;
     }

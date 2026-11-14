@@ -22,17 +22,25 @@ record ChunkFacts(int dataVersion, int x, int z, long captureTimeMillis, boolean
 
     private static boolean noBlocks(Map<String, NbtValue> root) {
         if (root.get("block_entities") instanceof NbtValue.ListValue blockEntities
-                && !blockEntities.values().isEmpty()) return false;
-        if (!(root.get("sections") instanceof NbtValue.ListValue sections)) return false;
+                && !blockEntities.values().isEmpty())
+            return false;
+        if (!(root.get("sections") instanceof NbtValue.ListValue sections))
+            return false;
         for (NbtValue entry : sections.values()) {
-            if (!(entry instanceof NbtValue.CompoundValue section)) return false;
+            if (!(entry instanceof NbtValue.CompoundValue section))
+                return false;
             NbtValue states = section.values().get("block_states");
-            if (!(states instanceof NbtValue.CompoundValue blockStates)) return false;
-            if (!(blockStates.values().get("palette") instanceof NbtValue.ListValue palette)) return false;
+            if (!(states instanceof NbtValue.CompoundValue blockStates))
+                return false;
+            if (!(blockStates.values().get("palette") instanceof NbtValue.ListValue palette))
+                return false;
             for (NbtValue state : palette.values()) {
-                if (!(state instanceof NbtValue.CompoundValue block)) return false;
-                if (!(block.values().get("Name") instanceof NbtValue.StringValue name)) return false;
-                if (!List.of("minecraft:air", "minecraft:cave_air", "minecraft:void_air").contains(name.value())) {
+                if (!(state instanceof NbtValue.CompoundValue block))
+                    return false;
+                if (!(block.values().get("Name") instanceof NbtValue.StringValue name))
+                    return false;
+                if (!List.of("minecraft:air", "minecraft:cave_air", "minecraft:void_air")
+                                .contains(name.value())) {
                     return false;
                 }
             }

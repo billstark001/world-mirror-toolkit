@@ -15,15 +15,8 @@ final class SchemaFile {
     public List<PacketFile> packets = List.of();
 
     ProtocolSchema toSchema() {
-        return new ProtocolSchema(
-                schemaVersion,
-                minecraftVersion,
-                protocolVersion,
-                networkProtocol,
-                dataVersion,
-                minSectionY,
-                maxSectionY,
-                aliases,
+        return new ProtocolSchema(schemaVersion, minecraftVersion, protocolVersion, networkProtocol,
+                dataVersion, minSectionY, maxSectionY, aliases,
                 packets.stream().map(PacketFile::toDescriptor).toList());
     }
 
@@ -37,14 +30,8 @@ final class SchemaFile {
         public String confidence = "medium";
 
         PacketDescriptor toDescriptor() {
-            return new PacketDescriptor(
-                    PacketState.valueOf(state.toUpperCase()),
-                    direction,
-                    id,
-                    name,
-                    PacketKind.valueOf(kind.toUpperCase()),
-                    parser,
-                    confidence);
+            return new PacketDescriptor(PacketState.valueOf(state.toUpperCase()), direction, id, name,
+                    PacketKind.valueOf(kind.toUpperCase()), parser, confidence);
         }
     }
 }

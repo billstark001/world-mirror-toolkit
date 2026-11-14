@@ -13,10 +13,9 @@ class WorldLayoutTest {
         assertEquals(WorldLayout.NAMESPACED, WorldLayout.forVersion("26.2"));
         assertEquals(WorldLayout.NAMESPACED, WorldLayout.forVersion("27.0"));
         Path save = Path.of("save");
-        assertEquals(save.resolve("DIM-1"), WorldLayout.LEGACY.dimensionPath(save,
-                new DimensionKey("minecraft:the_nether")));
+        assertEquals(save.resolve("DIM-1"),
+                WorldLayout.LEGACY.dimensionPath(save, new DimensionKey("minecraft:the_nether")));
         assertEquals(save.resolve("dimensions/minecraft/the_nether"),
-                WorldLayout.NAMESPACED.dimensionPath(save,
-                        new DimensionKey("minecraft:the_nether")));
+                WorldLayout.NAMESPACED.dimensionPath(save, new DimensionKey("minecraft:the_nether")));
     }
 }

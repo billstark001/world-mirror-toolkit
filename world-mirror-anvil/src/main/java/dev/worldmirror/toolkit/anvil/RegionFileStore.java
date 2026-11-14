@@ -26,7 +26,8 @@ final class RegionFileStore {
 
     Map<Integer, Slot> read(Path path) throws IOException {
         Map<Integer, Slot> slots = new TreeMap<>();
-        if (!Files.exists(path)) return slots;
+        if (!Files.exists(path))
+            return slots;
         try (RandomAccessFile file = new RandomAccessFile(path.toFile(), "r")) {
             for (var entry : locations(file, path).entrySet()) {
                 int i = entry.getKey();
@@ -46,7 +47,8 @@ final class RegionFileStore {
 
     BitSet occupiedSlots(Path path) throws IOException {
         var slots = new BitSet(1024);
-        if (!Files.exists(path)) return slots;
+        if (!Files.exists(path))
+            return slots;
         try (var file = new RandomAccessFile(path.toFile(), "r")) {
             locations(file, path).keySet().forEach(slots::set);
         }
@@ -56,8 +58,10 @@ final class RegionFileStore {
     private static Map<Integer, Location> locations(RandomAccessFile file, Path path) throws IOException {
         Map<Integer, Location> slots = new TreeMap<>();
         long length = file.length();
-        if (LegacyRegionPlaceholder.isEmpty(length)) return slots;
-        if (length < SECTOR * 2) throw new IOException("truncated region header: " + path);
+        if (LegacyRegionPlaceholder.isEmpty(length))
+            return slots;
+        if (length < SECTOR * 2)
+            throw new IOException("truncated region header: " + path);
         byte[] header = new byte[SECTOR * 2];
         file.readFully(header);
         var occupied = new BitSet();
@@ -65,7 +69,8 @@ final class RegionFileStore {
             int p = i * 4;
             int sector = ((header[p] & 255) << 16) | ((header[p + 1] & 255) << 8) | (header[p + 2] & 255);
             int count = header[p + 3] & 255;
-            if (sector == 0 && count == 0) continue;
+            if (sector == 0 && count == 0)
+                continue;
             if (sector < 2 || count < 1 || ((long) sector + count) * SECTOR > length) {
                 throw new IOException("invalid region slot " + i + " in " + path);
             }
@@ -83,7 +88,8 @@ final class RegionFileStore {
 
     NbtValue.CompoundValue chunk(Slot slot) throws IOException {
         int codec = slot.payload()[0] & 255;
-        if ((codec & 128) != 0) throw new IOException("external MCA chunk streams are unsupported");
+        if ((codec & 128) != 0)
+            throw new IOException("external MCA chunk streams are unsupported");
         InputStream raw = new ByteArrayInputStream(slot.payload(), 1, slot.payload().length - 1);
         InputStream decoded = switch (codec) {
             case 1 -> new GZIPInputStream(raw);
@@ -119,11 +125,13 @@ final class RegionFileStore {
                 out.write(new byte[SECTOR * 2]);
                 for (Map.Entry<Integer, Slot> entry : new TreeMap<>(slots).entrySet()) {
                     int slot = entry.getKey();
-                    if (slot < 0 || slot >= 1024) throw new IOException("invalid chunk slot " + slot);
+                    if (slot < 0 || slot >= 1024)
+                        throw new IOException("invalid chunk slot " + slot);
                     byte[] payload = entry.getValue().payload();
                     int sectors = Math.ceilDiv(payload.length + 4, SECTOR);
                     if (sectors > 255 || sectorCursor > 0xFFFFFF) {
-                        throw new IOException("region chunk exceeds MCA sector limit: " + path + " slot " + slot);
+                        throw new IOException(
+                                "region chunk exceeds MCA sector limit: " + path + " slot " + slot);
                     }
                     int p = slot * 4;
                     locations[p] = (byte) (sectorCursor >>> 16);
@@ -160,7 +168,8 @@ final class RegionFileStore {
         }
         Path temporary = Files.createTempFile(target.getParent(), "region-restore-", ".tmp");
         try {
-            Files.copy(backup, temporary, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+            Files.copy(backup, temporary, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES);
             replace(temporary, target);
         } finally {
             Files.deleteIfExists(temporary);

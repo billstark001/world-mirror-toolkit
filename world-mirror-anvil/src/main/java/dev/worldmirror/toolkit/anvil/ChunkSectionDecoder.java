@@ -25,12 +25,14 @@ final class ChunkSectionDecoder {
                 PaletteData blockData = readPalette(cursor, bits, BLOCK_ENTRIES, true);
                 int biomeBits = cursor.readUnsignedByte();
                 PaletteData biomeData = readPalette(cursor, biomeBits, BIOME_ENTRIES, false);
-                NbtValue.CompoundValue section = buildSection(sectionY, nonEmptyBlocks, bits, blockData, biomeBits, biomeData, mappings, biomes);
+                NbtValue.CompoundValue section = buildSection(
+                        sectionY, nonEmptyBlocks, bits, blockData, biomeBits, biomeData, mappings, biomes);
                 if (section != null) {
                     sections.add(section);
                 }
             } catch (RuntimeException ex) {
-                throw new ParseException("section " + sectionIndex + " decode failed at byte " + cursor.offset(), ex);
+                throw new ParseException(
+                        "section " + sectionIndex + " decode failed at byte " + cursor.offset(), ex);
             }
             sectionIndex++;
         }
@@ -40,8 +42,9 @@ final class ChunkSectionDecoder {
         return new DecodeResult(sections, warnings);
     }
 
-    private NbtValue.CompoundValue buildSection(int sectionY, int nonEmptyBlocks, int sourceBits, PaletteData source,
-            int biomeBits, PaletteData biomeData, RegistryMappings mappings, Map<Integer, String> biomes) {
+    private NbtValue.CompoundValue buildSection(int sectionY, int nonEmptyBlocks, int sourceBits,
+            PaletteData source, int biomeBits, PaletteData biomeData, RegistryMappings mappings,
+            Map<Integer, String> biomes) {
         List<NbtValue.CompoundValue> diskPalette = new ArrayList<>();
         List<Integer> diskValues = new ArrayList<>();
         long[] dataLongs = source.rawLongs();
@@ -74,7 +77,9 @@ final class ChunkSectionDecoder {
         if (diskPalette.isEmpty()) {
             diskPalette.add(mappings.blockStateNbt(0));
         }
-        if (nonEmptyBlocks == 0 && diskPalette.size() == 1 && "minecraft:air".equals(mappings.blockStateName(source.palette().isEmpty() ? 0 : source.palette().getFirst()))) {
+        if (nonEmptyBlocks == 0 && diskPalette.size() == 1
+                && "minecraft:air".equals(mappings.blockStateName(
+                        source.palette().isEmpty() ? 0 : source.palette().getFirst()))) {
             return null;
         }
 
@@ -84,9 +89,10 @@ final class ChunkSectionDecoder {
         if (diskBits > 0) {
             // 26.1.2 PalettedContainer.read uses SimpleBitStorage.getRaw() via readFixedSizeLongArray:
             // there is no length prefix; the long count is derived from entries and bits.
-            blockStates.put("data", NbtValue.longArray(dataLongs.length > 0 && diskBits == sourceBits
-                    ? dataLongs
-                    : packBits(diskValues, diskBits)));
+            blockStates.put("data",
+                    NbtValue.longArray(dataLongs.length > 0 && diskBits == sourceBits
+                                    ? dataLongs
+                                    : packBits(diskValues, diskBits)));
         }
 
         Map<String, NbtValue> biomeTag = buildBiomes(biomeBits, biomeData, biomes);
@@ -98,16 +104,21 @@ final class ChunkSectionDecoder {
         return NbtValue.compound(section);
     }
 
-    private Map<String, NbtValue> buildBiomes(int sourceBits, PaletteData source, Map<Integer, String> names) {
-        if (names.isEmpty()) throw new IllegalArgumentException("replay contains no biome registry");
+    private Map<String, NbtValue> buildBiomes(
+            int sourceBits, PaletteData source, Map<Integer, String> names) {
+        if (names.isEmpty())
+            throw new IllegalArgumentException("replay contains no biome registry");
         List<Integer> globalIds = sourceBits == 0 ? List.of(source.palette().getFirst())
-                : sourceBits < 4 ? source.palette() : source.values();
+                : sourceBits < 4                  ? source.palette()
+                                                  : source.values();
         Map<Integer, Integer> index = new LinkedHashMap<>();
         List<NbtValue> palette = new ArrayList<>();
         for (int id : globalIds) {
-            if (index.containsKey(id)) continue;
+            if (index.containsKey(id))
+                continue;
             String name = names.get(id);
-            if (name == null) throw new IllegalArgumentException("unknown biome registry id " + id);
+            if (name == null)
+                throw new IllegalArgumentException("unknown biome registry id " + id);
             index.put(id, palette.size());
             palette.add(NbtValue.stringValue(name));
         }
@@ -115,11 +126,13 @@ final class ChunkSectionDecoder {
         out.put("palette", NbtValue.list(NbtTagId.STRING, palette));
         if (palette.size() > 1) {
             int diskBits = Math.max(1, 32 - Integer.numberOfLeadingZeros(palette.size() - 1));
-            if (sourceBits > 0 && sourceBits < 4 && diskBits == sourceBits && index.size() == source.palette().size()) {
+            if (sourceBits > 0 && sourceBits < 4 && diskBits == sourceBits
+                    && index.size() == source.palette().size()) {
                 out.put("data", NbtValue.longArray(source.rawLongs()));
             } else {
                 List<Integer> sourceValues = sourceBits == 0 ? List.of()
-                        : sourceBits < 4 ? unpackBits(source.rawLongs(), sourceBits, BIOME_ENTRIES) : source.values();
+                        : sourceBits < 4 ? unpackBits(source.rawLongs(), sourceBits, BIOME_ENTRIES)
+                                         : source.values();
                 List<Integer> diskValues = new ArrayList<>(BIOME_ENTRIES);
                 for (int value : sourceValues) {
                     int id = sourceBits < 4 ? source.palette().get(value) : value;
@@ -139,7 +152,8 @@ final class ChunkSectionDecoder {
         } else if (bits < globalThreshold) {
             int paletteSize = cursor.readVarInt();
             if (paletteSize < 0 || paletteSize > entries || paletteSize > (1 << bits)) {
-                throw new IllegalArgumentException("invalid local palette size " + paletteSize + " for " + bits + " bits");
+                throw new IllegalArgumentException(
+                        "invalid local palette size " + paletteSize + " for " + bits + " bits");
             }
             for (int i = 0; i < paletteSize; i++) {
                 palette.add(cursor.readVarInt());

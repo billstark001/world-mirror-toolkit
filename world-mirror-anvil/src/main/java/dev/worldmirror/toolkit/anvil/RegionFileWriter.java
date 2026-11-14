@@ -39,7 +39,8 @@ public final class RegionFileWriter {
                 int chunkBlobLength = payloadLength + 4;
                 int sectorCount = Math.ceilDiv(chunkBlobLength, SECTOR_BYTES);
                 if (sectorCount > 255) {
-                    throw new IOException("chunk " + entry.getKey() + " requires " + sectorCount + " sectors, maximum is 255");
+                    throw new IOException("chunk " + entry.getKey() + " requires " + sectorCount
+                            + " sectors, maximum is 255");
                 }
                 int tableIndex = entry.getKey().localIndex() * 4;
                 locations[tableIndex] = (byte) ((sectorCursor >>> 16) & 0xFF);

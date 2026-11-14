@@ -25,7 +25,8 @@ public final class AnalysisChunkBuilder {
         return build(packet, packetCountForChunk, Map.of(), schema.minSectionY());
     }
 
-    public Optional<NbtValue.CompoundValue> build(DecodedChunkPacket packet, int packetCountForChunk, Map<Integer, String> biomes) {
+    public Optional<NbtValue.CompoundValue> build(
+            DecodedChunkPacket packet, int packetCountForChunk, Map<Integer, String> biomes) {
         return build(packet, packetCountForChunk, biomes, schema.minSectionY());
     }
 
@@ -36,8 +37,10 @@ public final class AnalysisChunkBuilder {
 
     public Optional<NbtValue.CompoundValue> build(DecodedChunkPacket packet, int packetCountForChunk,
             Map<Integer, String> biomes, int minSectionY, long captureTimeMillis, String replayFile) {
-        ChunkSectionDecoder.DecodeResult sectionResult = sectionDecoder.decode(packet.rawChunkData(), mappings, minSectionY, biomes);
-        LightDataDecoder.DecodeResult lightResult = lightDecoder.decode(packet.rawLightData(), minSectionY - 1);
+        ChunkSectionDecoder.DecodeResult sectionResult =
+                sectionDecoder.decode(packet.rawChunkData(), mappings, minSectionY, biomes);
+        LightDataDecoder.DecodeResult lightResult =
+                lightDecoder.decode(packet.rawLightData(), minSectionY - 1);
         List<NbtValue.CompoundValue> sections = new ArrayList<>();
         for (NbtValue.CompoundValue section : sectionResult.sections()) {
             Map<String, NbtValue> values = new LinkedHashMap<>(section.values());
@@ -89,7 +92,8 @@ public final class AnalysisChunkBuilder {
         root.put("Status", NbtValue.stringValue("minecraft:full"));
         root.put("LastUpdate", NbtValue.longValue(0));
         root.put("InhabitedTime", NbtValue.longValue(0));
-        root.put("isLightOn", NbtValue.byteValue(!lightResult.block().isEmpty() || !lightResult.sky().isEmpty()));
+        root.put("isLightOn",
+                NbtValue.byteValue(!lightResult.block().isEmpty() || !lightResult.sky().isEmpty()));
         root.put("sections", NbtValue.list(NbtTagId.COMPOUND, new ArrayList<>(sections)));
         root.put("block_entities", NbtValue.list(NbtTagId.COMPOUND, blockEntities));
         root.put("entities", NbtValue.list(NbtTagId.COMPOUND, List.of()));

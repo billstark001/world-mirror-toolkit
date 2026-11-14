@@ -25,7 +25,8 @@ public final class WorldMirrorToolkitGui {
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(720, 240);
         JPanel panel = new JPanel(new BorderLayout(16, 16));
-        panel.add(new JLabel("world-mirror-toolkit GUI placeholder. Use the CLI for now."), BorderLayout.CENTER);
+        panel.add(new JLabel("world-mirror-toolkit GUI placeholder. Use the CLI for now."),
+                BorderLayout.CENTER);
         JButton close = new JButton("Close");
         close.addActionListener(event -> frame.dispose());
         panel.add(close, BorderLayout.SOUTH);

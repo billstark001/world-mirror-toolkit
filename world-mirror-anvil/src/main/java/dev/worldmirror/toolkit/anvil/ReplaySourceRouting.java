@@ -25,7 +25,8 @@ final class ReplaySourceRouting {
     private static final String SERVER_PREFIX = "server:";
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    record Evidence(ChunkImporter.Routing request, Path graph, List<String> candidates, List<String> lineage) {
+    record Evidence(
+            ChunkImporter.Routing request, Path graph, List<String> candidates, List<String> lineage) {
         String source() {
             return lineage.isEmpty() ? null : lineage.getLast();
         }
@@ -40,19 +41,23 @@ final class ReplaySourceRouting {
                 int port = DEFAULT_PORT;
                 if (address.startsWith("[")) {
                     int close = address.indexOf(']');
-                    if (close < 0) throw new IllegalArgumentException();
+                    if (close < 0)
+                        throw new IllegalArgumentException();
                     host = ipv6(address.substring(1, close));
                     if (close < address.length() - 1) {
-                        if (address.charAt(close + 1) != ':') throw new IllegalArgumentException();
+                        if (address.charAt(close + 1) != ':')
+                            throw new IllegalArgumentException();
                         port = port(address.substring(close + 2));
                     }
                 } else if (firstColon >= 0 && firstColon != address.lastIndexOf(':')) {
                     host = ipv6(address);
                 } else {
                     String name = firstColon < 0 ? address : address.substring(0, firstColon);
-                    if (name.isBlank() || name.equals(".")) throw new IllegalArgumentException();
+                    if (name.isBlank() || name.equals("."))
+                        throw new IllegalArgumentException();
                     host = IDN.toASCII(name, IDN.USE_STD3_ASCII_RULES).toLowerCase(Locale.ROOT);
-                    if (firstColon >= 0) port = port(address.substring(firstColon + 1));
+                    if (firstColon >= 0)
+                        port = port(address.substring(firstColon + 1));
                 }
                 return new Endpoint(host, port);
             } catch (IllegalArgumentException | java.net.UnknownHostException invalid) {
@@ -77,7 +82,8 @@ final class ReplaySourceRouting {
                 throw new IllegalArgumentException();
             }
             int port = Integer.parseInt(input);
-            if (port < 1 || port > 65535) throw new IllegalArgumentException();
+            if (port < 1 || port > 65535)
+                throw new IllegalArgumentException();
             return port;
         }
     }
@@ -91,7 +97,8 @@ final class ReplaySourceRouting {
             return unverified(mirrorId, request, graph, allowMismatch);
         }
         String server = replayKey != null && replayKey.startsWith(SERVER_PREFIX)
-                ? replayKey.substring(SERVER_PREFIX.length()) : null;
+                ? replayKey.substring(SERVER_PREFIX.length())
+                : null;
         if (graph == null) {
             return unverified(mirrorId, request, graph, allowMismatch);
         }
@@ -106,13 +113,14 @@ final class ReplaySourceRouting {
             return unverified(mirrorId, request, graph, allowMismatch);
         }
         Set<String> candidates = candidates(document, endpoint);
-        if (candidates.isEmpty()) return unverified(mirrorId, request, graph, allowMismatch);
+        if (candidates.isEmpty())
+            return unverified(mirrorId, request, graph, allowMismatch);
 
         String selected = request.replaySource();
         if (selected == null) {
             if (candidates.size() != 1) {
-                throw new IOException("replay endpoint has multiple logical sources: " + String.join(", ", candidates)
-                        + "; confirm one with --replay-source");
+                throw new IOException("replay endpoint has multiple logical sources: "
+                        + String.join(", ", candidates) + "; confirm one with --replay-source");
             }
             selected = candidates.iterator().next();
         } else if (!candidates.contains(selected)) {
@@ -141,15 +149,17 @@ final class ReplaySourceRouting {
 
     private static Path graphPath(Path save, Path requested) throws IOException {
         Path nativeGraph = nativeGraphPath(save);
-        if (requested == null) return nativeGraph;
+        if (requested == null)
+            return nativeGraph;
         Path file = requested.toAbsolutePath().normalize();
-        ChunkImporter.requirePlainFile(file);
+        ImportSavePaths.requirePlainFile(file);
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("world graph config is missing: " + file);
         }
         Path canonical = file.toRealPath();
         if (nativeGraph != null && !nativeGraph.equals(canonical)) {
-            throw new IOException("--world-graph cannot override the destination's routing config: " + nativeGraph);
+            throw new IOException(
+                    "--world-graph cannot override the destination's routing config: " + nativeGraph);
         }
         return canonical;
     }
@@ -163,14 +173,15 @@ final class ReplaySourceRouting {
         Path conventionalRoot = worlds.resolveSibling(directory);
         if (!Set.of("saves", "downloaded_worlds").contains(directory)
                 || !Files.isDirectory(conventionalRoot, LinkOption.NOFOLLOW_LINKS)
-                || !Files.isSameFile(worlds, conventionalRoot)) return null;
+                || !Files.isSameFile(worlds, conventionalRoot))
+            return null;
         Path config = worlds.getParent().resolve("config");
-        ChunkImporter.requirePlainDirectory(config);
+        ImportSavePaths.requirePlainDirectory(config);
         Path worldMirror = config.resolve("worldmirror");
-        ChunkImporter.requirePlainDirectory(worldMirror);
+        ImportSavePaths.requirePlainDirectory(worldMirror);
         requireRecoveredConfig(worldMirror);
         Path file = worldMirror.resolve("world-graph.json");
-        ChunkImporter.requirePlainFile(file);
+        ImportSavePaths.requirePlainFile(file);
         return Files.notExists(file, LinkOption.NOFOLLOW_LINKS) ? null : file;
     }
 
@@ -180,9 +191,12 @@ final class ReplaySourceRouting {
         try (var input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
             bytes = input.readNBytes(MAX_GRAPH_BYTES + 1);
         }
-        if (bytes.length > MAX_GRAPH_BYTES) throw new IOException("world graph exceeds size limit: " + path);
-        JsonNode value = JSON.reader().with(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(bytes);
+        if (bytes.length > MAX_GRAPH_BYTES)
+            throw new IOException("world graph exceeds size limit: " + path);
+        JsonNode value = JSON.reader()
+                                 .with(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+                                 .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                                 .readTree(bytes);
         var schema = value.path("schema");
         if (!schema.isIntegralNumber() || !schema.canConvertToInt() || schema.intValue() != GRAPH_SCHEMA
                 || !value.path("endpointRules").isObject() || !value.path("nodes").isObject()) {
@@ -192,7 +206,8 @@ final class ReplaySourceRouting {
     }
 
     private static void requireRecoveredConfig(Path directory) throws IOException {
-        if (Files.notExists(directory, LinkOption.NOFOLLOW_LINKS)) return;
+        if (Files.notExists(directory, LinkOption.NOFOLLOW_LINKS))
+            return;
         try (var journals = Files.newDirectoryStream(directory, ".worldmirror-transaction-*")) {
             if (journals.iterator().hasNext()) {
                 throw new IOException("world graph requires recovery in World Mirror: " + directory);
@@ -205,38 +220,48 @@ final class ReplaySourceRouting {
         JsonNode rule = null;
         for (var fields = rules.fields(); fields.hasNext();) {
             var entry = fields.next();
-            if (!endpoint.equals(Endpoint.parse(entry.getKey()))) continue;
+            if (!endpoint.equals(Endpoint.parse(entry.getKey())))
+                continue;
             if (rule != null) {
                 throw new IOException("invalid or duplicate endpoint rule in world graph: " + entry.getKey());
             }
             rule = entry.getValue();
         }
-        if (rule == null) return Set.of();
+        if (rule == null)
+            return Set.of();
         Set<String> candidates = sourceIds(rule);
         String group = rule.path("addressGroupId").textValue();
         String policy = rule.path("idPolicy").textValue();
         if (group == null || group.isBlank() || policy == null
                 || !Set.of("ENDPOINT_ONLY", "PREFER_BOUND_ID", "REQUIRE_BOUND_ID").contains(policy)) {
-            throw new IOException("unsupported address group or stable ID policy; refresh the graph in World Mirror");
+            throw new IOException(
+                    "unsupported address group or stable ID policy; refresh the graph in World Mirror");
         }
-        if (policy.equals("ENDPOINT_ONLY")) return candidates;
+        if (policy.equals("ENDPOINT_ONLY"))
+            return candidates;
         Set<String> groupSources = new HashSet<>(candidates);
         for (JsonNode sibling : rules) {
-            if (group.equals(sibling.path("addressGroupId").textValue())) groupSources.addAll(sourceIds(sibling));
+            if (group.equals(sibling.path("addressGroupId").textValue()))
+                groupSources.addAll(sourceIds(sibling));
         }
         JsonNode bindings = document.path("stableBindings");
-        if (!bindings.isArray()) throw new IOException("invalid stable ID bindings in world graph");
+        if (!bindings.isArray())
+            throw new IOException("invalid stable ID bindings in world graph");
         for (JsonNode binding : bindings) {
-            if (!group.equals(binding.path("addressGroupId").textValue())) continue;
+            if (!group.equals(binding.path("addressGroupId").textValue()))
+                continue;
             String source = binding.path("sourceId").textValue();
-            if (!typed(source, "remote:")) throw new IOException("invalid stable ID source in world graph");
-            if (groupSources.contains(source)) candidates.add(source);
+            if (!typed(source, "remote:"))
+                throw new IOException("invalid stable ID source in world graph");
+            if (groupSources.contains(source))
+                candidates.add(source);
         }
         return candidates;
     }
 
     private static Set<String> sourceIds(JsonNode rule) throws IOException {
-        if (!rule.path("sourceIds").isArray()) throw new IOException("invalid logical sources in endpoint rule");
+        if (!rule.path("sourceIds").isArray())
+            throw new IOException("invalid logical sources in endpoint rule");
         Set<String> candidates = new TreeSet<>();
         for (JsonNode source : rule.path("sourceIds")) {
             String id = source.textValue();
@@ -260,7 +285,8 @@ final class ReplaySourceRouting {
                 return List.copyOf(lineage);
             }
             if (!typed(id, "mirror:") || !id.equals(node.path("id").textValue())
-                    || !"MIRROR".equals(node.path("kind").textValue())) break;
+                    || !"MIRROR".equals(node.path("kind").textValue()))
+                break;
             id = node.path("parentId").textValue();
         }
         throw new IOException("mirror " + mirrorId + " has no verified remote upstream lineage");

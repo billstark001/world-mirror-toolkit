@@ -13,14 +13,17 @@ import org.junit.jupiter.api.Test;
 class ReplayProtocolDecoderTest {
     @Test
     void spawnUsesDimensionTypeMinYAndKeepsWorldIdentityAcrossDimensions() throws IOException {
-        ReplayProtocolDecoder decoder = new ReplayProtocolDecoder(SchemaRepository.loadBundled().require("26.2"));
+        ReplayProtocolDecoder decoder =
+                new ReplayProtocolDecoder(SchemaRepository.loadBundled().require("26.2"));
         decoder.advance(event(7, registry()));
         decoder.advance(event(3, new byte[0]));
 
-        ReplayProtocolDecoder.SpawnInfo overworld = decoder.tryDecodeWorldSwitch(
-                event(82, spawn(0, "minecraft:overworld", -123456789L))).orElseThrow();
-        ReplayProtocolDecoder.SpawnInfo nether = decoder.tryDecodeWorldSwitch(
-                event(82, spawn(1, "minecraft:the_nether", -123456789L))).orElseThrow();
+        ReplayProtocolDecoder.SpawnInfo overworld =
+                decoder.tryDecodeWorldSwitch(event(82, spawn(0, "minecraft:overworld", -123456789L)))
+                        .orElseThrow();
+        ReplayProtocolDecoder.SpawnInfo nether =
+                decoder.tryDecodeWorldSwitch(event(82, spawn(1, "minecraft:the_nether", -123456789L)))
+                        .orElseThrow();
 
         assertEquals(-4, overworld.minSectionY());
         assertEquals(0, nether.minSectionY());

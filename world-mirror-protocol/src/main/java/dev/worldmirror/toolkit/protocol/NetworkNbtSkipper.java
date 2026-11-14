@@ -34,7 +34,8 @@ public final class NetworkNbtSkipper {
         OptionalInt result = OptionalInt.empty();
         while (true) {
             int child = cursor.readUnsignedByte();
-            if (child == 0) return result;
+            if (child == 0)
+                return result;
             int length = cursor.readUnsignedShort();
             String name = new String(cursor.readBytes(length), StandardCharsets.UTF_8);
             if (child == 3 && field.equals(name)) {
@@ -50,14 +51,16 @@ public final class NetworkNbtSkipper {
             throw new ParseException("NBT nesting exceeds " + MAX_DEPTH);
         }
         switch (tagType) {
-            case 0 -> { }
+            case 0 -> {
+            }
             case 1 -> cursor.skip(1);
             case 2 -> cursor.skip(2);
             case 3, 5 -> cursor.skip(4);
             case 4, 6 -> cursor.skip(8);
             case 7 -> {
                 int length = cursor.readInt();
-                if (length < 0 || length > MAX_ARRAY_BYTES) throw new ParseException("bad NBT byte-array length " + length);
+                if (length < 0 || length > MAX_ARRAY_BYTES)
+                    throw new ParseException("bad NBT byte-array length " + length);
                 cursor.skip(length);
             }
             case 8 -> {
@@ -67,7 +70,8 @@ public final class NetworkNbtSkipper {
             case 9 -> {
                 int elem = cursor.readUnsignedByte();
                 int length = cursor.readInt();
-                if (length < 0 || length > MAX_LIST_ITEMS) throw new ParseException("bad NBT list length " + length);
+                if (length < 0 || length > MAX_LIST_ITEMS)
+                    throw new ParseException("bad NBT list length " + length);
                 for (int i = 0; i < length; i++) {
                     skipPayload(cursor, elem, depth + 1);
                 }
@@ -75,7 +79,8 @@ public final class NetworkNbtSkipper {
             case 10 -> {
                 while (true) {
                     int child = cursor.readUnsignedByte();
-                    if (child == 0) return;
+                    if (child == 0)
+                        return;
                     int nameLength = cursor.readUnsignedShort();
                     cursor.skip(nameLength);
                     skipPayload(cursor, child, depth + 1);
@@ -83,15 +88,19 @@ public final class NetworkNbtSkipper {
             }
             case 11 -> {
                 int length = cursor.readInt();
-                if (length < 0 || length > MAX_LIST_ITEMS) throw new ParseException("bad NBT int-array length " + length);
+                if (length < 0 || length > MAX_LIST_ITEMS)
+                    throw new ParseException("bad NBT int-array length " + length);
                 cursor.skip(length * 4);
             }
             case 12 -> {
                 int length = cursor.readInt();
-                if (length < 0 || length > MAX_LIST_ITEMS) throw new ParseException("bad NBT long-array length " + length);
+                if (length < 0 || length > MAX_LIST_ITEMS)
+                    throw new ParseException("bad NBT long-array length " + length);
                 cursor.skip(length * 8);
             }
-            default -> throw new ParseException("unsupported NBT tag id " + tagType + " at offset " + cursor.offset());
+            default ->
+                throw new ParseException(
+                        "unsupported NBT tag id " + tagType + " at offset " + cursor.offset());
         }
     }
 }

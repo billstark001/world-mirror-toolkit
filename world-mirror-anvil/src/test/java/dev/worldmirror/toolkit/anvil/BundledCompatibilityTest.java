@@ -18,13 +18,15 @@ class BundledCompatibilityTest {
         assertVersion("26.3", 777, 5023, 46);
     }
 
-    private void assertVersion(String version, int protocol, int dataVersion, int chunkPacketId) throws IOException {
+    private void assertVersion(String version, int protocol, int dataVersion, int chunkPacketId)
+            throws IOException {
         ProtocolSchema schema = SchemaRepository.loadBundled().require(version, protocol);
         RegistryMappings mappings = RegistryMappings.loadBundled(version);
         assertEquals(dataVersion, schema.dataVersion());
         assertEquals(dataVersion, mappings.dataVersion());
         assertEquals("minecraft:air", mappings.blockStateName(0));
-        assertEquals(PacketKind.REGISTRY_DATA, schema.findByPacketId(PacketState.CONFIGURATION, 7).orElseThrow().kind());
+        assertEquals(PacketKind.REGISTRY_DATA,
+                schema.findByPacketId(PacketState.CONFIGURATION, 7).orElseThrow().kind());
         assertEquals(PacketKind.LEVEL_CHUNK_WITH_LIGHT,
                 schema.findByPacketId(PacketState.PLAY, chunkPacketId).orElseThrow().kind());
         assertTrue(schema.findByPacketId(PacketState.CONFIGURATION, chunkPacketId).isEmpty());

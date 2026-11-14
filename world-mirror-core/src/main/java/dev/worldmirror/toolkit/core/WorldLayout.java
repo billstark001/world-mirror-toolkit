@@ -6,16 +6,19 @@ import java.util.regex.Pattern;
 
 /** On-disk dimension layout of a Minecraft save. */
 public enum WorldLayout {
-    LEGACY, NAMESPACED;
+    LEGACY,
+    NAMESPACED;
     private static final Pattern VERSION = Pattern.compile("^(\\d+)\\.(\\d+)(?:\\..*)?$");
 
     public static WorldLayout forVersion(String version) {
-        if (version == null) return LEGACY;
+        if (version == null)
+            return LEGACY;
         var match = VERSION.matcher(version);
         if (match.matches()) {
             int major = Integer.parseInt(match.group(1));
             int minor = Integer.parseInt(match.group(2));
-            if (major > 26 || major == 26 && minor >= 1) return NAMESPACED;
+            if (major > 26 || major == 26 && minor >= 1)
+                return NAMESPACED;
         }
         return LEGACY;
     }
@@ -25,7 +28,9 @@ public enum WorldLayout {
             case "auto" -> forVersion(version);
             case "legacy" -> LEGACY;
             case "namespaced" -> NAMESPACED;
-            default -> throw new IllegalArgumentException("unknown layout " + value + "; use auto, legacy, or namespaced");
+            default ->
+                throw new IllegalArgumentException(
+                        "unknown layout " + value + "; use auto, legacy, or namespaced");
         };
     }
 
@@ -35,8 +40,8 @@ public enum WorldLayout {
             return ".".equals(subdir) ? worldRoot : worldRoot.resolve(subdir);
         }
         String[] parts = dimension.value().split(":", 2);
-        if (parts.length != 2 || !parts[0].matches("[a-z0-9_.-]+")
-                || !parts[1].matches("[a-z0-9_./-]+") || parts[1].contains("..")) {
+        if (parts.length != 2 || !parts[0].matches("[a-z0-9_.-]+") || !parts[1].matches("[a-z0-9_./-]+")
+                || parts[1].contains("..")) {
             throw new IllegalArgumentException("unsafe dimension key " + dimension.value());
         }
         return worldRoot.resolve("dimensions").resolve(parts[0]).resolve(parts[1]);

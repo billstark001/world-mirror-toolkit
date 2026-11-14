@@ -17,15 +17,8 @@ public final class ProtocolSchema {
     private final List<String> aliases;
     private final List<PacketDescriptor> packets;
 
-    public ProtocolSchema(
-            String schemaVersion,
-            String minecraftVersion,
-            String protocolVersion,
-            int networkProtocol,
-            int dataVersion,
-            int minSectionY,
-            int maxSectionY,
-            List<String> aliases,
+    public ProtocolSchema(String schemaVersion, String minecraftVersion, String protocolVersion,
+            int networkProtocol, int dataVersion, int minSectionY, int maxSectionY, List<String> aliases,
             List<PacketDescriptor> packets) {
         this.schemaVersion = Objects.requireNonNull(schemaVersion, "schemaVersion");
         this.minecraftVersion = Objects.requireNonNull(minecraftVersion, "minecraftVersion");
@@ -38,22 +31,43 @@ public final class ProtocolSchema {
         this.packets = List.copyOf(packets == null ? List.of() : packets);
     }
 
-    public String schemaVersion() { return schemaVersion; }
-    public String minecraftVersion() { return minecraftVersion; }
-    public String protocolVersion() { return protocolVersion; }
-    public int networkProtocol() { return networkProtocol; }
-    public int dataVersion() { return dataVersion; }
-    public int minSectionY() { return minSectionY; }
-    public int maxSectionY() { return maxSectionY; }
-    public List<String> aliases() { return aliases; }
-    public List<PacketDescriptor> packets() { return packets; }
+    public String schemaVersion() {
+        return schemaVersion;
+    }
+    public String minecraftVersion() {
+        return minecraftVersion;
+    }
+    public String protocolVersion() {
+        return protocolVersion;
+    }
+    public int networkProtocol() {
+        return networkProtocol;
+    }
+    public int dataVersion() {
+        return dataVersion;
+    }
+    public int minSectionY() {
+        return minSectionY;
+    }
+    public int maxSectionY() {
+        return maxSectionY;
+    }
+    public List<String> aliases() {
+        return aliases;
+    }
+    public List<PacketDescriptor> packets() {
+        return packets;
+    }
 
     public boolean matchesVersion(String requested) {
-        return minecraftVersion.equals(requested) || protocolVersion.equals(requested) || aliases.contains(requested);
+        return minecraftVersion.equals(requested) || protocolVersion.equals(requested)
+                || aliases.contains(requested);
     }
 
     public Optional<PacketDescriptor> findByPacketId(PacketState state, int id) {
-        return packets.stream().filter(p -> p.state() == state && p.id() == id && "clientbound".equals(p.direction())).findFirst();
+        return packets.stream()
+                .filter(p -> p.state() == state && p.id() == id && "clientbound".equals(p.direction()))
+                .findFirst();
     }
 
     public List<PacketDescriptor> findByKind(PacketKind kind) {

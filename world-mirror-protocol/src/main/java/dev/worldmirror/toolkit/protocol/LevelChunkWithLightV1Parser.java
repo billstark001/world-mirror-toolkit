@@ -37,18 +37,13 @@ public final class LevelChunkWithLightV1Parser {
             }
             int nbtStart = cursor.offset();
             nbtSkipper.skipUnnamedRoot(cursor);
-            blockEntities.add(new DecodedChunkPacket.BlockEntity(packedXZ, y, typeId, cursor.slice(nbtStart, cursor.offset())));
+            blockEntities.add(new DecodedChunkPacket.BlockEntity(
+                    packedXZ, y, typeId, cursor.slice(nbtStart, cursor.offset())));
         }
         byte[] rawChunkData = cursor.slice(chunkDataStart, chunkDataEnd);
         byte[] rawLightData = cursor.slice(cursor.offset(), cursor.data().length);
-        return new DecodedChunkPacket(
-                event.index(),
-                event.timestampMillis(),
-                dimension,
-                new ChunkPos(chunkX, chunkZ),
-                rawChunkData,
-                rawLightData,
-                List.copyOf(blockEntities),
+        return new DecodedChunkPacket(event.index(), event.timestampMillis(), dimension,
+                new ChunkPos(chunkX, chunkZ), rawChunkData, rawLightData, List.copyOf(blockEntities),
                 "level-chunk-with-light/v1");
     }
 

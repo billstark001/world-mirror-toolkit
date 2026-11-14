@@ -59,6 +59,12 @@ Use `--no-backup` when a backup already exists. The importer keeps a temporary r
 
 The toolkit uses `world-mirror-format:0.1.4` for metadata paths, SQLite, source priority, seed provenance and region verification. During development, add `--include-build ../world-mirror/world-mirror-format` to the Gradle command. Gradle can resolve published Format releases through Ivy.
 
+## Contributing
+
+Use JDK 21, Gradle 8.13, and Node.js 22.17 or newer. Run `npm ci` to install the pinned ClangFormat version, `npm run format` to format Java, and `gradle check` to run the Java limits and tests. CI checks formatting before `gradle lintJava`. Each formatted Java file is limited to 500 physical lines, including comments and blank lines. `if`, loops, `try`, `switch`, and `synchronized` each add one level of control flow, up to four. `else if` stays at the same level. Method, lambda, and class bodies start at depth zero.
+
+The import command uses `ChunkImporter` to create and execute previews. `ChunkImportPlanner` checks the source, destination, routing and each chunk's eligibility. `ChunkImportExecutor` rechecks the plan under the destination save lock, verifies installed region data, and then commits the mirror index. `MirrorImportIndex` owns index access and `MirrorImportMetadata` validates the destination identity and advances `lastSyncTime`. Keep these stages in order and cover recovery cases with the shared import test fixture.
+
 ## Scope
 
 The output is an analysis save, not a fully playable world. It does not reconstruct incremental block updates, entities, POI, or heightmaps. The latest full chunk packet is retained per source, world identity, dimension, and coordinate. A hashed seed can collide across unrelated worlds on the same server, so inspect the export manifest when provenance is uncertain. See [roadmap](docs/roadmap.md) and [schema format](docs/schema.md).

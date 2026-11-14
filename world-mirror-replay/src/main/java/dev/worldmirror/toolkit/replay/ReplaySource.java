@@ -6,6 +6,5 @@ import java.io.IOException;
 public interface ReplaySource extends AutoCloseable {
     void forEach(ReplayEventHandler handler) throws IOException;
 
-    @Override
-    void close() throws IOException;
+    @Override void close() throws IOException;
 }

@@ -44,11 +44,13 @@ public final class TmcprEventReader implements ReplaySource {
             }
             offset += 8;
             if (length < 0 || length > maxPacketBytes) {
-                throw new ParseException("invalid replay packet length " + length + " at payload offset " + offset);
+                throw new ParseException(
+                        "invalid replay packet length " + length + " at payload offset " + offset);
             }
             byte[] payload = in.readNBytes(length);
             if (payload.length != length) {
-                throw new ParseException("truncated replay packet at payload offset " + offset + ": expected " + length + ", got " + payload.length);
+                throw new ParseException("truncated replay packet at payload offset " + offset + ": expected "
+                        + length + ", got " + payload.length);
             }
             handler.accept(new ReplayEvent(index, offset - 8, timestamp, payload));
             offset += length;

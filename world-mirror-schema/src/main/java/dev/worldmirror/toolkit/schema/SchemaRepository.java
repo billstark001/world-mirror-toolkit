@@ -13,18 +13,15 @@ import java.util.Objects;
 
 /** Loads bundled and user-provided versioned schemas. */
 public final class SchemaRepository {
-    private static final List<String> BUNDLED = List.of(
-            "schemas/26.1.2.json",
-            "schemas/26.2.json",
-            "schemas/26.3.json");
+    private static final List<String> BUNDLED =
+            List.of("schemas/26.1.2.json", "schemas/26.2.json", "schemas/26.3.json");
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final List<ProtocolSchema> schemas;
 
     private SchemaRepository(List<ProtocolSchema> schemas) {
-        this.schemas = schemas.stream()
-                .sorted(Comparator.comparing(ProtocolSchema::minecraftVersion))
-                .toList();
+        this.schemas =
+                schemas.stream().sorted(Comparator.comparing(ProtocolSchema::minecraftVersion)).toList();
     }
 
     public static SchemaRepository loadBundled() {
@@ -63,7 +60,11 @@ public final class SchemaRepository {
         return schemas.stream()
                 .filter(schema -> schema.matchesVersion(versionOrAlias))
                 .findFirst()
-                .orElseThrow(() -> new ToolkitException("unsupported schema/version: " + versionOrAlias + "; available: " + schemas.stream().map(ProtocolSchema::minecraftVersion).toList()));
+                .orElseThrow(
+                        ()
+                                -> new ToolkitException("unsupported schema/version: " + versionOrAlias
+                                        + "; available: "
+                                        + schemas.stream().map(ProtocolSchema::minecraftVersion).toList()));
     }
 
     public ProtocolSchema require(String version, int protocol) {

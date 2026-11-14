@@ -17,13 +17,10 @@ public final class ReplayIndexWriter {
             source.forEach(event -> {
                 int packetId = event.hasReadablePacketId() ? event.packetId() : -1;
                 int packetIdLen = event.hasReadablePacketId() ? event.packetIdLength() : -1;
-                out.write("{\"index\":" + event.index()
-                        + ",\"offset\":" + event.fileOffset()
+                out.write("{\"index\":" + event.index() + ",\"offset\":" + event.fileOffset()
                         + ",\"timestamp_ms\":" + event.timestampMillis()
-                        + ",\"length\":" + event.payloadLength()
-                        + ",\"packet_id\":" + packetId
-                        + ",\"packet_id_len\":" + packetIdLen
-                        + "}");
+                        + ",\"length\":" + event.payloadLength() + ",\"packet_id\":" + packetId
+                        + ",\"packet_id_len\":" + packetIdLen + "}");
                 out.newLine();
                 count[0]++;
             });

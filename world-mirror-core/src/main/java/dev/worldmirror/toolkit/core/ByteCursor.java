@@ -126,7 +126,8 @@ public final class ByteCursor {
 
     public byte[] slice(int startInclusive, int endExclusive) {
         if (startInclusive < 0 || endExclusive < startInclusive || endExclusive > data.length) {
-            throw new ParseException("invalid slice " + startInclusive + ".." + endExclusive + " for " + data.length + " bytes");
+            throw new ParseException("invalid slice " + startInclusive + ".." + endExclusive + " for "
+                    + data.length + " bytes");
         }
         return Arrays.copyOfRange(data, startInclusive, endExclusive);
     }
@@ -145,7 +146,8 @@ public final class ByteCursor {
 
     private void require(int length, String what) {
         if (offset + length > data.length) {
-            throw new ParseException("truncated " + what + " at offset " + offset + ", need " + length + " bytes, remaining " + remaining());
+            throw new ParseException("truncated " + what + " at offset " + offset + ", need " + length
+                    + " bytes, remaining " + remaining());
         }
     }
 }

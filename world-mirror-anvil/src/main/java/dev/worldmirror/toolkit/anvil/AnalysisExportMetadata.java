@@ -14,8 +14,8 @@ import java.util.zip.GZIPOutputStream;
 /** Provenance for an analysis export, alongside a minimal standard level.dat version marker. */
 public record AnalysisExportMetadata(String format, int metadataSchema, String minecraftVersion,
         int dataVersion, String layout, String sourceKey, String worldId, String hashedSeed,
-        long firstCaptureMillis, long lastCaptureMillis, long playDurationMillis,
-        List<String> replayFiles, Map<String, Integer> chunksByDimension) {
+        long firstCaptureMillis, long lastCaptureMillis, long playDurationMillis, List<String> replayFiles,
+        Map<String, Integer> chunksByDimension) {
     public static final String FILE_NAME = "worldmirror_toolkit_export.json";
     private static final String FORMAT = "world-mirror-toolkit.analysis";
     private static final ObjectMapper JSON = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
@@ -35,7 +35,8 @@ public record AnalysisExportMetadata(String format, int metadataSchema, String m
     }
 
     public static AnalysisExportMetadata read(Path worldRoot) throws IOException {
-        AnalysisExportMetadata result = JSON.readValue(worldRoot.resolve(FILE_NAME).toFile(), AnalysisExportMetadata.class);
+        AnalysisExportMetadata result =
+                JSON.readValue(worldRoot.resolve(FILE_NAME).toFile(), AnalysisExportMetadata.class);
         if (!FORMAT.equals(result.format()) || result.metadataSchema() != 1) {
             throw new IOException("unsupported analysis metadata in " + worldRoot.resolve(FILE_NAME));
         }
@@ -64,8 +65,8 @@ public record AnalysisExportMetadata(String format, int metadataSchema, String m
         data.put("initialized", NbtValue.byteValue(false));
         Map<String, NbtValue> root = Map.of("Data", NbtValue.compound(data));
         byte[] nbt = new PortableNbtWriter().writeUnnamedRoot(NbtValue.compound(root));
-        try (GZIPOutputStream compressed = new GZIPOutputStream(
-                Files.newOutputStream(worldRoot.resolve("level.dat")))) {
+        try (GZIPOutputStream compressed =
+                        new GZIPOutputStream(Files.newOutputStream(worldRoot.resolve("level.dat")))) {
             compressed.write(nbt);
         }
     }

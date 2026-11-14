@@ -37,6 +37,8 @@ Mirror imports preserve nonempty chunks with no matching index record by default
 
 Mirror mode requires metadata schema 2. Open World Mirror to migrate older metadata before importing. The import uses the destination's stable node ID to verify the target and its `sourceId` to open the SQLite namespace. It checks the replay endpoint against the logical source at the root of the mirror's upstream lineage. When the destination's game routing config is unavailable, pass `--world-graph path/to/world-graph.json`.
 
+Both mirrors and snapshots can carry an upstream edge. Toolkit checks the entire chain and its remote root. For the native graph beside `saves` or `downloaded_worlds`, the importer verifies each file-backed upstream against its saved identity and holds World Mirror's graph lease before locking the destination. With an external graph, it rechecks the supplied graph against the preview before writing. Use `--allow-source-mismatch` to confirm an import only when provenance is unavailable, such as a detached destination or a missing upstream. A known mismatch, invalid lineage, or cycle still prevents the import.
+
 If the endpoint has multiple logical worlds, pass `--replay-source remote:…` with the ID of the world the replay actually recorded. The selected source must be an endpoint candidate and match the mirror's upstream root. If routing evidence is unavailable, verify the target manually before using `--allow-source-mismatch`.
 
 Toolkit keeps World Mirror's older on-disk checks in `io.github.billstark001.worldmirror.legacy`. It treats unversioned mirror metadata and zero-byte MCA placeholders as v0. The metadata check directs v0 and v1 saves to the mod for migration.

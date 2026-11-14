@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.worldmirror.toolkit.core.ChunkPos;
 import io.github.billstark001.worldmirror.format.ChunkIndexStore;
+import io.github.billstark001.worldmirror.format.WorldGraphLease;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -119,6 +120,8 @@ class ChunkImportRoutingTest extends ChunkImportFixture {
         writeGraphMetadata(destination, "mirror:first", "mirror:upstream", "index:namespace");
         Path graph = temporary.resolve("game/config/worldmirror/world-graph.json");
         writeRoutingGraph(graph, "\"remote:logical-source\"");
+        Path upstream = Files.createDirectories(destination.resolveSibling("Upstream"));
+        writeGraphMetadata(upstream, "mirror:upstream", "remote:logical-source", "server:example.test");
 
         var options = new ChunkImporter.Options(source, destination, ChunkImporter.Mode.MIRROR,
                 ChunkImporter.Policy.TIMESTAMP, "auto", false);
@@ -135,10 +138,28 @@ class ChunkImportRoutingTest extends ChunkImportFixture {
                         .getMessage()
                         .contains("world graph requires recovery"));
         Files.delete(journal);
+        Path adoption = graph.resolveSibling(".world-graph-local-adoption.json");
+        Files.writeString(adoption, "{}");
+        assertTrue(assertThrows(IOException.class, () -> importer.plan(fallback))
+                        .getMessage()
+                        .contains("world graph requires recovery"));
+        Files.delete(adoption);
 
         var plan = importer.plan(options);
         assertEquals("remote:logical-source", plan.asMap().get("replay_source"));
         assertEquals("index:namespace", plan.sourceId());
+        var lease = WorldGraphLease.acquire(graph.getParent());
+        try (lease) {
+            assertTrue(assertThrows(IOException.class, () -> importer.execute(plan, false))
+                            .getMessage()
+                            .contains("World graph operation is already running"));
+            assertTrue(Files.notExists(destination.resolve("session.lock")));
+        }
+        writeGraphMetadata(upstream, "mirror:upstream", "remote:other", "server:example.test");
+        assertTrue(assertThrows(IOException.class, () -> importer.execute(plan, false))
+                        .getMessage()
+                        .contains("differs from the saved world"));
+        writeGraphMetadata(upstream, "mirror:upstream", "remote:logical-source", "server:example.test");
         importer.execute(plan, false);
         try (var connection = openIndex(destination)) {
             assertEquals(1,
@@ -146,6 +167,32 @@ class ChunkImportRoutingTest extends ChunkImportFixture {
                             .queryAll("minecraft:overworld")
                             .size());
         }
+    }
+
+    @Test
+    void nativeLineageCannotWaiveAnExistingWorldWithheldByInventory() throws Exception {
+        Path source = source();
+        Path destination = temporary.resolve("game/saves/Target");
+        Files.createDirectories(destination);
+        Files.copy(source.resolve("level.dat"), destination.resolve("level.dat"));
+        writeRegion(source, Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:stone", CAPTURE)));
+        writeGraphMetadata(destination, "mirror:first", "mirror:upstream", "index:namespace");
+        Path graph = temporary.resolve("game/config/worldmirror/world-graph.json");
+        writeRoutingGraph(graph, "\"remote:logical-source\"");
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var document = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(graph.toFile());
+        var nodes = (com.fasterxml.jackson.databind.node.ObjectNode) document.path("nodes");
+        var savedLocation = nodes.remove("mirror:upstream").path("location");
+        document.putObject("locations").set("mirror:upstream", savedLocation);
+        mapper.writeValue(graph.toFile(), document);
+        Path upstream = Files.createDirectories(destination.resolveSibling("Upstream"));
+        writeGraphMetadata(upstream, "mirror:upstream", "mirror:first", "index:upstream");
+
+        var importer = new ChunkImporter();
+        assertTrue(assertThrows(IOException.class, () -> importer.plan(mirrorOptions(source, destination)))
+                        .getMessage()
+                        .contains("withheld world mirror:upstream"));
+        assertTrue(Files.notExists(destination.resolve("session.lock")));
     }
 
     @Test
@@ -224,13 +271,103 @@ class ChunkImportRoutingTest extends ChunkImportFixture {
         Files.writeString(graph,
                 """
                 {"schema":2,"nodes":{
-                    "mirror:upstream":{"id":"mirror:upstream","kind":"MIRROR","parentId":"remote:logical-source"},
+                    "mirror:upstream":{"id":"mirror:upstream","kind":"MIRROR","parentId":"remote:logical-source",
+                        "location":{"root":"SAVES","folder":"Upstream"}},
                     "remote:logical-source":{"id":"remote:logical-source","kind":"REMOTE"},
                     "remote:other":{"id":"remote:other","kind":"REMOTE","parentId":null}},
                  "endpointRules":{"%s:25565":{"addressGroupId":"endpoint:test","idPolicy":"PREFER_BOUND_ID",
                     "sourceIds":[%s],"defaultSourceId":"remote:logical-source"}},"stableBindings":[]}
                 """.formatted(
                         SOURCE.substring("server:".length()).toUpperCase(java.util.Locale.ROOT), sources));
+    }
+
+    @Test
+    void replaysThroughASnapshotAndRechecksTheEntireChain() throws Exception {
+        Path source = source();
+        Path destination = destination();
+        writeRegion(source, Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:stone", CAPTURE)));
+        writeGraphMetadata(destination, "mirror:first", "mirror:upstream", "index:preserved");
+        Path graph = temporary.resolve("mixed-graph.json");
+        writeRoutingGraph(graph, "\"remote:logical-source\"");
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        var document = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(graph.toFile());
+        var nodes = (com.fasterxml.jackson.databind.node.ObjectNode) document.path("nodes");
+        var upstream = (com.fasterxml.jackson.databind.node.ObjectNode) nodes.path("mirror:upstream");
+        upstream.put("parentId", "snapshot:base");
+        nodes.putObject("snapshot:base")
+                .put("id", "snapshot:base")
+                .put("kind", "SNAPSHOT")
+                .put("parentId", "remote:logical-source");
+        json.writeValue(graph.toFile(), document);
+        var options = new ChunkImporter.Options(source, destination, ChunkImporter.Mode.MIRROR,
+                ChunkImporter.Policy.TIMESTAMP, "auto", false);
+        var request = new ChunkImporter.Routing(graph, null);
+        var importer = new ChunkImporter();
+        var plan = importer.plan(options, false, request);
+        assertEquals("remote:logical-source", plan.asMap().get("replay_source"));
+        assertEquals("index:preserved", plan.sourceId());
+
+        upstream.put("parentId", "remote:logical-source");
+        json.writeValue(graph.toFile(), document);
+        assertTrue(assertThrows(IOException.class, () -> importer.execute(plan, false))
+                        .getMessage()
+                        .contains("review a fresh plan"));
+        assertTrue(Files.notExists(region(destination)));
+        assertTrue(Files.notExists(plan.database()));
+
+        upstream.put("parentId", "snapshot:base");
+        json.writeValue(graph.toFile(), document);
+        importer.execute(plan, false);
+        assertTrue(Files.isRegularFile(region(destination)));
+    }
+
+    @Test
+    void onlyMissingLineageEvidenceCanBeWaived() throws Exception {
+        Path source = source();
+        Path destination = destination();
+        writeRegion(source, Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:stone", CAPTURE)));
+        writeGraphMetadata(destination, "mirror:first", "mirror:upstream", "index:preserved");
+        Path graph = temporary.resolve("world-graph.json");
+        writeRoutingGraph(graph, "\"remote:logical-source\"");
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        var document = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(graph.toFile());
+        var nodes = (com.fasterxml.jackson.databind.node.ObjectNode) document.path("nodes");
+        var upstream = (com.fasterxml.jackson.databind.node.ObjectNode) nodes.path("mirror:upstream");
+        var request = new ChunkImporter.Routing(graph, null);
+        var importer = new ChunkImporter();
+        var waived = mirrorOptions(source, destination);
+        var required = new ChunkImporter.Options(source, destination, ChunkImporter.Mode.MIRROR,
+                ChunkImporter.Policy.TIMESTAMP, "auto", false);
+
+        upstream.put("parentId", "snapshot:missing");
+        json.writeValue(graph.toFile(), document);
+        assertTrue(assertThrows(IOException.class, () -> importer.plan(required, false, request))
+                        .getMessage()
+                        .contains("missing upstream snapshot:missing"));
+        var pending = importer.plan(waived, false, request);
+        assertEquals(null, pending.asMap().get("replay_source"));
+
+        var intermediate = nodes.putObject("snapshot:missing")
+                                   .put("id", "snapshot:missing")
+                                   .put("kind", "SNAPSHOT")
+                                   .put("parentId", "mirror:first");
+        json.writeValue(graph.toFile(), document);
+        assertTrue(assertThrows(IOException.class, () -> importer.plan(waived, false, request))
+                        .getMessage()
+                        .contains("CYCLE"));
+
+        intermediate.put("kind", "MIRROR");
+        json.writeValue(graph.toFile(), document);
+        assertTrue(assertThrows(IOException.class, () -> importer.plan(waived, false, request))
+                        .getMessage()
+                        .contains("INVALID"));
+
+        upstream.put("parentId", "local:a");
+        nodes.putObject("local:a").put("id", "local:a").put("kind", "LOCAL");
+        json.writeValue(graph.toFile(), document);
+        assertTrue(assertThrows(IOException.class, () -> importer.plan(waived, false, request))
+                        .getMessage()
+                        .contains("does not match"));
     }
 
     @Test

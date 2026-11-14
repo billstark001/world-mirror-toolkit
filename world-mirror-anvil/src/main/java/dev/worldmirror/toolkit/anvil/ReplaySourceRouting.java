@@ -4,13 +4,15 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.billstark001.worldmirror.format.WorldGraphLease;
+import io.github.billstark001.worldmirror.format.WorldLineage;
 import java.io.IOException;
 import java.net.IDN;
 import java.net.InetAddress;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -25,12 +27,10 @@ final class ReplaySourceRouting {
     private static final String SERVER_PREFIX = "server:";
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    record Evidence(
-            ChunkImporter.Routing request, Path graph, List<String> candidates, List<String> lineage) {
-        String source() {
-            return lineage.isEmpty() ? null : lineage.getLast();
-        }
-    }
+    record Evidence(ChunkImporter.Routing request, GraphSource graph, List<String> candidates,
+            WorldLineage.Trace lineage, String source) {}
+
+    record GraphSource(Path file, Path nativeDirectory, boolean usesNativeFile) {}
 
     private record Endpoint(String host, int port) {
         static Endpoint parse(String input) throws IOException {
@@ -92,30 +92,70 @@ final class ReplaySourceRouting {
 
     static Evidence verify(Path destination, String mirrorId, String parentId, String replayKey,
             ChunkImporter.Routing request, boolean allowMismatch) throws IOException {
-        Path graph = graphPath(destination, request.worldGraph());
-        if (parentId == null) {
-            return unverified(mirrorId, request, graph, allowMismatch);
+        GraphSource graph = graphSource(destination, request.worldGraph());
+        if (graph.file() == null)
+            return unverified(mirrorId, request, graph, List.of(), null, allowMismatch, "no routing graph");
+
+        JsonNode document = readGraph(graph.file());
+        var nodes = document.path("nodes");
+        WorldLineage.Trace lineage = WorldLineage.trace(mirrorId, parentId, id -> link(nodes, id));
+        if (lineage.state() == WorldLineage.State.INVALID || lineage.state() == WorldLineage.State.CYCLE) {
+            throw new IOException("invalid world graph lineage for " + mirrorId + ": " + lineage.state()
+                    + " at " + lineage.stopId());
         }
-        String server = replayKey != null && replayKey.startsWith(SERVER_PREFIX)
-                ? replayKey.substring(SERVER_PREFIX.length())
-                : null;
-        if (graph == null) {
-            return unverified(mirrorId, request, graph, allowMismatch);
+        if (graph.usesNativeFile()) {
+            lineage = NativeLineage.verify(graph.nativeDirectory(), document, mirrorId, lineage);
         }
-        JsonNode document = readGraph(graph);
-        if (server == null || server.equals("unknown")) {
-            return unverified(mirrorId, request, graph, allowMismatch);
+        Set<String> candidates = replayCandidates(document, replayKey);
+        if (lineage.root() != null && lineage.root().kind() == WorldLineage.Kind.LOCAL
+                && replayServer(replayKey) != null) {
+            throw new IOException("replay server does not match mirror " + mirrorId
+                    + " with local upstream root " + lineage.root().id());
         }
+        String reason = switch (lineage.state()) {
+            case MISSING ->
+                lineage.stopId() == null ? "detached destination" : "missing upstream " + lineage.stopId();
+            case UNRESOLVED -> "unresolved upstream " + lineage.stopId();
+            case ROOT ->
+                lineage.root().kind() == WorldLineage.Kind.REMOTE ? null : "lineage has no remote root";
+            default -> throw new IllegalStateException("Unexpected lineage state " + lineage.state());
+        };
+        List<String> evidence = List.copyOf(candidates);
+        if (reason != null || candidates.isEmpty()) {
+            return unverified(mirrorId, request, graph, evidence, lineage, allowMismatch,
+                    reason == null ? "replay endpoint has no binding" : reason);
+        }
+        String selected = selectSource(request, candidates);
+        String root = lineage.root().id();
+        if (!selected.equals(root)) {
+            throw new IOException("replay source " + selected + " does not match mirror " + mirrorId
+                    + " with upstream root " + root);
+        }
+        return new Evidence(request, graph, evidence, lineage, selected);
+    }
+
+    private static Set<String> replayCandidates(JsonNode document, String replayKey) throws IOException {
+        String server = replayServer(replayKey);
+        if (server == null)
+            return Set.of();
         Endpoint endpoint;
         try {
             endpoint = Endpoint.parse(server);
         } catch (IOException invalidLabel) {
-            return unverified(mirrorId, request, graph, allowMismatch);
+            return Set.of();
         }
-        Set<String> candidates = candidates(document, endpoint);
-        if (candidates.isEmpty())
-            return unverified(mirrorId, request, graph, allowMismatch);
+        return candidates(document, endpoint);
+    }
 
+    private static String replayServer(String replayKey) {
+        if (replayKey == null || !replayKey.startsWith(SERVER_PREFIX))
+            return null;
+        String server = replayKey.substring(SERVER_PREFIX.length());
+        return server.equals("unknown") || server.isBlank() ? null : server;
+    }
+
+    private static String selectSource(ChunkImporter.Routing request, Set<String> candidates)
+            throws IOException {
         String selected = request.replaySource();
         if (selected == null) {
             if (candidates.size() != 1) {
@@ -126,45 +166,52 @@ final class ReplaySourceRouting {
         } else if (!candidates.contains(selected)) {
             throw new IOException("--replay-source is not a candidate for the replay endpoint: " + selected);
         }
-        List<String> lineage = lineage(document.path("nodes"), mirrorId, parentId);
-        String root = lineage.getLast();
-        if (!selected.equals(root)) {
-            throw new IOException("replay source " + selected + " does not match mirror " + mirrorId
-                    + " with upstream root " + root);
-        }
-        return new Evidence(request, graph, List.copyOf(candidates), lineage);
+        return selected;
     }
 
-    private static Evidence unverified(String mirrorId, ChunkImporter.Routing request, Path graph,
-            boolean allowMismatch) throws IOException {
+    private static Evidence unverified(String mirrorId, ChunkImporter.Routing request, GraphSource graph,
+            List<String> candidates, WorldLineage.Trace trace, boolean allowMismatch, String reason)
+            throws IOException {
         if (request.replaySource() != null) {
-            throw new IOException("cannot verify --replay-source without a world graph endpoint binding");
+            throw new IOException("cannot verify --replay-source: " + reason);
         }
         if (!allowMismatch) {
-            throw new IOException("mirror " + mirrorId + " has no verifiable replay endpoint binding; "
+            throw new IOException("mirror " + mirrorId + " has no verifiable replay provenance (" + reason
+                    + "); "
                     + "supply --world-graph or use --allow-source-mismatch after verifying the target");
         }
-        return new Evidence(request, graph, List.of(), List.of());
+        return new Evidence(request, graph, candidates, trace, null);
     }
 
-    private static Path graphPath(Path save, Path requested) throws IOException {
-        Path nativeGraph = nativeGraphPath(save);
+    private static GraphSource graphSource(Path save, Path requested) throws IOException {
+        Path directory = nativeGraphDirectory(save);
+        Path nativeGraph = directory == null ? null : findNativeGraph(directory);
         if (requested == null)
-            return nativeGraph;
+            return new GraphSource(nativeGraph, directory, nativeGraph != null);
         Path file = requested.toAbsolutePath().normalize();
         ImportSavePaths.requirePlainFile(file);
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("world graph config is missing: " + file);
         }
         Path canonical = file.toRealPath();
-        if (nativeGraph != null && !nativeGraph.equals(canonical)) {
+        if (nativeGraph != null && !Files.isSameFile(nativeGraph, canonical)) {
             throw new IOException(
                     "--world-graph cannot override the destination's routing config: " + nativeGraph);
         }
-        return canonical;
+        return new GraphSource(nativeGraph == null ? canonical : nativeGraph, directory, nativeGraph != null);
     }
 
-    private static Path nativeGraphPath(Path save) throws IOException {
+    static FileChannel acquireNativeLease(Path destination) throws IOException {
+        Path directory = nativeGraphDirectory(destination);
+        if (directory == null)
+            return null;
+        Files.createDirectories(directory);
+        ImportSavePaths.requirePlainDirectory(directory.getParent());
+        ImportSavePaths.requirePlainDirectory(directory);
+        return WorldGraphLease.acquire(directory);
+    }
+
+    private static Path nativeGraphDirectory(Path save) throws IOException {
         Path worlds = save.getParent();
         if (worlds == null || worlds.getParent() == null) {
             return null;
@@ -179,8 +226,16 @@ final class ReplaySourceRouting {
         ImportSavePaths.requirePlainDirectory(config);
         Path worldMirror = config.resolve("worldmirror");
         ImportSavePaths.requirePlainDirectory(worldMirror);
-        requireRecoveredConfig(worldMirror);
-        Path file = worldMirror.resolve("world-graph.json");
+        return worldMirror;
+    }
+
+    private static Path findNativeGraph(Path directory) throws IOException {
+        if (!Files.notExists(
+                    directory.resolve(".world-graph-local-adoption.json"), LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("world graph requires recovery in World Mirror: " + directory);
+        }
+        requireRecoveredConfig(directory);
+        Path file = directory.resolve("world-graph.json");
         ImportSavePaths.requirePlainFile(file);
         return Files.notExists(file, LinkOption.NOFOLLOW_LINKS) ? null : file;
     }
@@ -251,7 +306,7 @@ final class ReplaySourceRouting {
             if (!group.equals(binding.path("addressGroupId").textValue()))
                 continue;
             String source = binding.path("sourceId").textValue();
-            if (!typed(source, "remote:"))
+            if (WorldLineage.kindOfId(source) != WorldLineage.Kind.REMOTE)
                 throw new IOException("invalid stable ID source in world graph");
             if (groupSources.contains(source))
                 candidates.add(source);
@@ -265,35 +320,22 @@ final class ReplaySourceRouting {
         Set<String> candidates = new TreeSet<>();
         for (JsonNode source : rule.path("sourceIds")) {
             String id = source.textValue();
-            if (!typed(id, "remote:") || !candidates.add(id)) {
+            if (WorldLineage.kindOfId(id) != WorldLineage.Kind.REMOTE || !candidates.add(id)) {
                 throw new IOException("invalid or duplicate logical source in endpoint rule");
             }
         }
         return candidates;
     }
 
-    private static List<String> lineage(JsonNode nodes, String mirrorId, String parentId) throws IOException {
-        List<String> lineage = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        seen.add(mirrorId);
-        String id = parentId;
-        while (id != null && seen.add(id)) {
-            lineage.add(id);
-            JsonNode node = nodes.path(id);
-            if (typed(id, "remote:") && id.equals(node.path("id").textValue())
-                    && "REMOTE".equals(node.path("kind").textValue()) && !node.hasNonNull("parentId")) {
-                return List.copyOf(lineage);
-            }
-            if (!typed(id, "mirror:") || !id.equals(node.path("id").textValue())
-                    || !"MIRROR".equals(node.path("kind").textValue()))
-                break;
-            id = node.path("parentId").textValue();
-        }
-        throw new IOException("mirror " + mirrorId + " has no verified remote upstream lineage");
-    }
-
-    private static boolean typed(String id, String prefix) {
-        return id != null && id.startsWith(prefix) && !id.substring(prefix.length()).isBlank()
-                && id.chars().noneMatch(Character::isISOControl);
+    private static WorldLineage.Link link(JsonNode nodes, String id) {
+        JsonNode node = nodes.path(id);
+        if (node.isMissingNode())
+            return null;
+        var expected = WorldLineage.kindOfId(id);
+        var kind = expected.name().equals(node.path("kind").textValue()) ? expected : null;
+        var parent = node.path("parentId");
+        if (!parent.isMissingNode() && !parent.isNull() && !parent.isTextual())
+            kind = null;
+        return new WorldLineage.Link(node.path("id").textValue(), kind, parent.textValue());
     }
 }

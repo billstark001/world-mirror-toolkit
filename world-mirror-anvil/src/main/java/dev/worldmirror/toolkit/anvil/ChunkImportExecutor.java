@@ -73,8 +73,11 @@ final class ChunkImportExecutor {
             }
         }
         Path lockPath = destination.resolve("session.lock");
-        try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE,
-                     StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+        FileChannel graphLease = preview.options().mode() == Mode.MIRROR
+                ? ReplaySourceRouting.acquireNativeLease(destination)
+                : null;
+        try (graphLease; FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE,
+                                 StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
                 FileLock lock = channel.tryLock()) {
             if (lock == null)
                 throw new IOException("destination is in use: " + destination);

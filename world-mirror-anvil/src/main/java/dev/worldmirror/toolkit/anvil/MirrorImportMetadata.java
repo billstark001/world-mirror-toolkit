@@ -5,13 +5,13 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.billstark001.worldmirror.format.MirrorFormat;
+import io.github.billstark001.worldmirror.format.WorldLineage;
 import io.github.billstark001.worldmirror.legacy.LegacyMirrorMetadata;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.List;
 import java.util.UUID;
 
 /** Validates the graph-backed destination identity and advances its capture-time floor. */
@@ -59,14 +59,12 @@ record MirrorImportMetadata(ObjectNode document, Identity identity, long lastSyn
         String kind = textField(value, "kind");
         String role = textField(value, "role");
         boolean validParent = value.path("parentNodeId").isMissingNode()
-                || value.path("parentNodeId").isNull()
-                || List.of("mirror:", "snapshot:", "local:", "remote:", "unresolved:")
-                           .stream()
-                           .anyMatch(prefix -> typedId(parent, prefix));
-        boolean mirror = "MIRROR".equals(kind) && typedId(nodeId, "mirror:") && validParent
+                || value.path("parentNodeId").isNull() || WorldLineage.kindOfId(parent) != null;
+        var nodeKind = WorldLineage.kindOfId(nodeId);
+        boolean mirror = "MIRROR".equals(kind) && nodeKind == WorldLineage.Kind.MIRROR && validParent
                 && ("SYNC".equals(role) || "SNAPSHOT".equals(role));
-        boolean snapshot = "SNAPSHOT".equals(kind) && typedId(nodeId, "snapshot:") && "SNAPSHOT".equals(role)
-                && validParent;
+        boolean snapshot = "SNAPSHOT".equals(kind) && nodeKind == WorldLineage.Kind.SNAPSHOT
+                && "SNAPSHOT".equals(role) && validParent;
         if (!mirror && !snapshot)
             throw new IOException("invalid mirror graph identity: " + file);
         return new MirrorImportMetadata(
@@ -98,10 +96,6 @@ record MirrorImportMetadata(ObjectNode document, Identity identity, long lastSyn
             // A blend marker must carry the target save's canonical seed epoch.
         }
         throw new IOException("invalid seed blending epoch in " + metadata);
-    }
-
-    private static boolean typedId(String id, String prefix) {
-        return id != null && id.startsWith(prefix) && !id.substring(prefix.length()).isBlank();
     }
 
     static void advanceLastSync(Path metadataPath, Identity expected, long newestImported)

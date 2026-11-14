@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.2] — 2026-11-14
 
 ### Changed
 
@@ -9,6 +9,7 @@
 - Require stored replay and seed source rules for timestamp imports. Preserve seed terrain unless the on-disk chunk matches its generation receipt.
 - Check entity and POI slots before replacing seed terrain. Store a capture receipt in the written region entry so a retry can restore its SQLite row after an interrupted commit.
 - When importing a seeded mirror, convert void-mirror biome palettes to vanilla equivalents and mark replayed Overworld borders for blending if enabled in the destination. Preserve native blending data.
+- Use World Mirror Format 0.1.4. Separate import preview, verified region installation, and mirror index updates.
 
 ### Fixed
 

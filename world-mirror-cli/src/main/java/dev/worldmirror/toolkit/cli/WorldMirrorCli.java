@@ -26,7 +26,7 @@ import picocli.CommandLine.Option;
 
 /** Main CLI entry point. */
 @Command(name = "world-mirror-toolkit", mixinStandardHelpOptions = true,
-        version = "world-mirror-toolkit 0.1.1",
+        version = "world-mirror-toolkit 0.1.2",
         description = "ReplayMod-to-Anvil toolkit for offline world mirroring.",
         subcommands = {WorldMirrorCli.IndexCommand.class, WorldMirrorCli.ExportAnalysisCommand.class,
                 WorldMirrorCli.ImportChunksCommand.class,

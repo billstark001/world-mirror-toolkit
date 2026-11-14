@@ -2,19 +2,25 @@
 
 ## [0.1.2] — 2026-11-14
 
+### Added
+
+- Add `import-chunks --world-graph` to supply routing information when the destination's graph is unavailable and `--replay-source` to confirm the world recorded at an endpoint with multiple logical sources.
+
 ### Changed
 
 - Require World Mirror metadata schema 2 for mirror imports. Migrate older saves in the mod before importing.
-- Require explicit source confirmation when a replay endpoint has multiple logical sources. Use the destination's stored SQLite namespace for chunk history and recheck its world identity under the save lock.
-- Require stored replay and seed source rules for timestamp imports. Preserve seed terrain unless the on-disk chunk matches its generation receipt.
-- Check entity and POI slots before replacing seed terrain. Store a capture receipt in the written region entry so a retry can restore its SQLite row after an interrupted commit.
-- When importing a seeded mirror, convert void-mirror biome palettes to vanilla equivalents and mark replayed Overworld borders for blending if enabled in the destination. Preserve native blending data.
-- Use World Mirror Format 0.1.4. Separate import preview, verified region installation, and mirror index updates.
+- Validate replay provenance against the destination's upstream root through mirrors and snapshots. `--allow-source-mismatch` can confirm missing evidence. A known mismatch, an invalid lineage, or a cycle blocks the import.
+- Preserve the destination's SQLite namespace and recheck its identity under the save lock. For the native graph, verify upstream identities on disk and hold the graph lease while applying the import.
+- Use the stored replay and seed source rules for timestamp imports. Replace seed terrain, including all-air chunks, only when it matches its generation receipt and no entity or POI slot protects it.
+- Convert void-mirror biome palettes to vanilla equivalents in seeded mirrors. Where enabled, mark imported Overworld borders for blending and preserve existing blending data.
+- Use World Mirror Format 0.1.4.
 
 ### Fixed
 
-- Follow snapshot and mirror upstream links when verifying Replay provenance. Recheck the lineage under the native graph lease before writing the destination.
-- Refuse imports while destination recovery is pending or import paths point through symbolic links or Windows directory junctions.
+- Keep dry runs from creating or modifying SQLite sidecars in the destination.
+- Store a capture receipt in the installed region entry so retrying an interrupted import can finish its SQLite index update.
+- Reject oversized or deeply nested NBT and invalid collection lengths before applying an import.
+- Refuse imports while destination or native graph recovery is pending, including unfinished local route adoptions. Reject import paths through symbolic links or Windows directory junctions.
 
 ## [0.1.1] — 2026-11-13
 

@@ -6,11 +6,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.BitSet;
-import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import static dev.worldmirror.toolkit.anvil.ImportSavePaths.requirePlainFile;
 import static dev.worldmirror.toolkit.anvil.ImportSavePaths.requirePlainDirectory;
 
@@ -34,15 +32,15 @@ final class ImportRegion {
         return cache.get(path);
     }
 
-    Set<Integer> auxiliarySlots(Path region) throws IOException {
-        Set<Integer> occupied = new HashSet<>();
+    BitSet auxiliarySlots(Path region) throws IOException {
+        var occupied = new BitSet(1024);
         Path dimension = region.getParent().getParent();
         for (String name : List.of("entities", "poi")) {
             Path directory = dimension.resolve(name);
             requirePlainDirectory(directory);
             Path sibling = directory.resolve(region.getFileName());
             requirePlainFile(sibling);
-            occupied.addAll(regions.read(sibling).keySet());
+            occupied.or(regions.occupiedSlots(sibling));
         }
         return occupied;
     }

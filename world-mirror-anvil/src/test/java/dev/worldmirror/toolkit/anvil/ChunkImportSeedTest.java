@@ -18,6 +18,42 @@ import org.junit.jupiter.api.Test;
 
 class ChunkImportSeedTest extends ChunkImportFixture {
     @Test
+    void emptySeedTerrainRequiresAnUnmodifiedReceiptAndRespectsIndexedPlayerUpdates() throws Exception {
+        Path source = source();
+        Path destination = destination();
+        writeSeededMetadata(destination, false);
+        writeRegion(source,
+                Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:stone", CAPTURE), new ChunkPos(1, 0),
+                        chunk(1, "minecraft:stone", CAPTURE), new ChunkPos(2, 0),
+                        chunk(2, "minecraft:stone", CAPTURE)));
+        writeRegion(destination,
+                Map.of(new ChunkPos(0, 0),
+                        withSeedReceipt(chunk(0, "minecraft:air", 0), EPOCH, false, "minecraft:air"),
+                        new ChunkPos(1, 0),
+                        withSeedReceipt(chunk(1, "minecraft:air", 0), EPOCH, true, "minecraft:air"),
+                        new ChunkPos(2, 0),
+                        withSeedReceipt(chunk(2, "minecraft:air", 0), EPOCH, false, "minecraft:air")));
+        try (var connection = openIndex(destination)) {
+            var index = new ChunkIndexStore(connection, SOURCE);
+            index.recordUpdates(
+                    "minecraft:overworld", Map.of(new ChunkIndexStore.ChunkCoordinate(2, 0), 1L), "player");
+        }
+
+        var importer = new ChunkImporter();
+        var emptyOnly = new ChunkImporter.Options(source, destination, ChunkImporter.Mode.MIRROR,
+                ChunkImporter.Policy.EMPTY_ONLY, "auto", true);
+        var timestamp = importer.plan(mirrorOptions(source, destination));
+        assertEquals(1, importer.plan(emptyOnly).chunksToWrite());
+        assertEquals(1, timestamp.chunksToWrite());
+        importer.execute(timestamp, false);
+        var regions = new RegionFileStore();
+        var slots = regions.read(region(destination));
+        assertEquals("minecraft:stone", blockName(regions.chunk(slots.get(0))));
+        assertEquals("minecraft:air", blockName(regions.chunk(slots.get(1))));
+        assertEquals("minecraft:air", blockName(regions.chunk(slots.get(2))));
+    }
+
+    @Test
     void timestampImportOnlyReplacesSeedTerrainThatMatchesItsCurrentReceipt() throws Exception {
         Path source = source();
         Path destination = destination();
@@ -55,7 +91,7 @@ class ChunkImportSeedTest extends ChunkImportFixture {
         var importer = new ChunkImporter();
         var emptyOnly = new ChunkImporter.Options(source, destination, ChunkImporter.Mode.MIRROR,
                 ChunkImporter.Policy.EMPTY_ONLY, "auto", true);
-        assertEquals(1, importer.plan(emptyOnly).emptyReplaced());
+        assertEquals(0, importer.plan(emptyOnly).emptyReplaced());
         var plan = importer.plan(mirrorOptions(source, destination), true);
         assertEquals(2, plan.newerReplaced());
         assertEquals(0, plan.emptyReplaced());
@@ -72,7 +108,7 @@ class ChunkImportSeedTest extends ChunkImportFixture {
         assertTrue(SeedTerrainEvidence.hasCaptureReceipt(regions.chunk(slots.get(0))));
         assertTrue(SeedTerrainEvidence.hasCaptureReceipt(regions.chunk(slots.get(5))));
         importer.execute(importer.plan(emptyOnly), false);
-        assertEquals("minecraft:stone", blockName(regions.chunk(regions.read(region(destination)).get(3))));
+        assertEquals("minecraft:air", blockName(regions.chunk(regions.read(region(destination)).get(3))));
     }
 
     @Test
@@ -303,9 +339,14 @@ class ChunkImportSeedTest extends ChunkImportFixture {
 
     private static NbtValue.CompoundValue withSeedReceipt(
             NbtValue.CompoundValue chunk, String epoch, boolean edited) {
+        return withSeedReceipt(chunk, epoch, edited, "minecraft:dirt");
+    }
+
+    private static NbtValue.CompoundValue withSeedReceipt(
+            NbtValue.CompoundValue chunk, String epoch, boolean edited, String baselineBlock) {
         String digest = SeedTerrainDigest.digest(Map.of("sections",
                 List.of(Map.of("Y", (byte) 0, "block_states",
-                        Map.of("palette", List.of(Map.of("Name", "minecraft:dirt"))), "biomes",
+                        Map.of("palette", List.of(Map.of("Name", baselineBlock))), "biomes",
                         Map.of("palette", List.of("minecraft:plains"))))));
         var fields = new HashMap<>(chunk.values());
         fields.put(SeedTerrainDigest.ATTACHMENTS,

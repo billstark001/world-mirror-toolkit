@@ -20,6 +20,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -204,7 +205,7 @@ final class ChunkImportExecutor {
         Map<Integer, RegionFileStore.Slot> slots = regions.read(target);
         Map<Integer, RegionFileStore.Slot> source = regions.read(decisions.getFirst().sourceRegion());
         Map<Integer, StagedChunk> staged = new LinkedHashMap<>();
-        Set<Integer> auxiliary = null;
+        BitSet auxiliary = null;
         MessageDigest hasher = sha256();
         for (Decision decision : decisions) {
             RegionFileStore.Slot incoming = source.get(decision.slot());
@@ -222,7 +223,7 @@ final class ChunkImportExecutor {
                 if (decision.seedReplacement()) {
                     if (auxiliary == null)
                         auxiliary = importRegion.auxiliarySlots(target);
-                    if (auxiliary.contains(decision.slot())) {
+                    if (auxiliary.get(decision.slot())) {
                         throw new IOException("destination auxiliary chunk data changed: " + target + " slot "
                                 + decision.slot());
                     }

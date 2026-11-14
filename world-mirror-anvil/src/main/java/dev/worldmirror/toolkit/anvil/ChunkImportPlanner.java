@@ -206,7 +206,7 @@ final class ChunkImportPlanner {
         Map<Integer, RegionFileStore.Slot> existing = regions.read(targetRegion);
         Map<ChunkCoordinate, ChunkRecord> indexed =
                 index == null ? Map.of() : indexedRegion(index, dimensionName, regionX, regionZ);
-        Set<Integer> auxiliary = null;
+        BitSet auxiliary = null;
         for (var slotEntry : incoming.entrySet()) {
             int slot = slotEntry.getKey();
             var coordinate = new ChunkCoordinate(regionX * 32 + slot % 32, regionZ * 32 + slot / 32);
@@ -261,10 +261,16 @@ final class ChunkImportPlanner {
                 preserved++;
                 continue;
             }
-            if (policy.mirror() && old != null && seedTerrain && (timestamp || state == Destination.EMPTY)) {
+            if (policy.mirror() && old != null && seedTerrain) {
+                // An empty block palette does not establish that the seed chunk is safe to overwrite.
+                if ((!timestamp && (state == Destination.PRESENT || record != null && !seedRow))
+                        || !SeedTerrainEvidence.isUnmodified(oldChunk)) {
+                    preserved++;
+                    continue;
+                }
                 if (auxiliary == null)
                     auxiliary = importRegion.auxiliarySlots(targetRegion);
-                if (auxiliary.contains(slot)) {
+                if (auxiliary.get(slot)) {
                     preserved++;
                     continue;
                 }
@@ -273,7 +279,6 @@ final class ChunkImportPlanner {
                 var expectedSeed = new ChunkRecord(coordinate.x(), coordinate.z(),
                         ChunkIndexStore.SEED_GENERATED_TIME, ChunkIndexStore.SEED_GENERATED);
                 if (seedRow && record.updateTime() != expectedSeed.updateTime()
-                        || !SeedTerrainEvidence.isUnmodified(oldChunk)
                         || ChunkUpdatePolicy.assess(update, expectedSeed, priorities)
                                 != IndexStatus.ELIGIBLE) {
                     preserved++;
@@ -281,8 +286,12 @@ final class ChunkImportPlanner {
                 }
                 seedReplacement = true;
                 status = IndexStatus.ELIGIBLE;
-            } else if (state == Destination.PRESENT && timestamp) {
+            } else if ((state == Destination.PRESENT || old != null && seedTerrain) && timestamp) {
                 status = ChunkUpdatePolicy.assess(update, record, priorities);
+                if (seedTerrain && status != IndexStatus.ELIGIBLE) {
+                    preserved++;
+                    continue;
+                }
             }
             Action action = ChunkUpdatePolicy.decide(policy.writePolicy(), state, status);
             boolean needsReceipt = alreadyIndexed ? policy.lastSyncTime() < update.captureTime()

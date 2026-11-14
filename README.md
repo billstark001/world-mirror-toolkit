@@ -41,6 +41,8 @@ If the endpoint has multiple logical worlds, pass `--replay-source remote:…` w
 
 Toolkit keeps World Mirror's older on-disk checks in `io.github.billstark001.worldmirror.legacy`. It treats unversioned mirror metadata and zero-byte MCA placeholders as v0. The metadata check directs v0 and v1 saves to the mod for migration.
 
+An all-air seed chunk in a mirror still needs valid, unmodified generation evidence before either policy can replace it. Entity or POI slots protect the terrain, and timestamp imports respect newer and higher-priority indexed updates to seed terrain.
+
 The command prints a plan before writing. When source and destination Minecraft versions differ, it asks `y/N`. Use `--yes` to accept the mismatch. `--dry-run` only prints the plan. A real import takes the save's `session.lock`, rechecks the plan, and backs up affected region files, mirror metadata, and SQLite before writing. Keep Minecraft closed during import. Each region is reopened and the imported NBT is verified before SQLite is updated. After an interrupted import, `verify_only` counts identical entries that can finish recording their index or metadata without rewriting MCA. `index` writes a JSONL packet-event index. The `schemas` and `selftest` commands report bundled support.
 
 Use `--no-backup` when a backup already exists. The importer keeps a temporary rollback file only for the region it is updating and removes it when that region finishes.

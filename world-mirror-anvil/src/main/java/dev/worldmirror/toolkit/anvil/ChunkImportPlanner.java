@@ -43,7 +43,6 @@ import static dev.worldmirror.toolkit.anvil.ImportSavePaths.regionDirectory;
 import static dev.worldmirror.toolkit.anvil.ImportRegion.matches;
 import static dev.worldmirror.toolkit.anvil.ImportRegion.sha256;
 import static dev.worldmirror.toolkit.anvil.ImportRegion.fingerprint;
-import static dev.worldmirror.toolkit.anvil.MirrorImportIndex.openReadOnlyIndex;
 import static dev.worldmirror.toolkit.anvil.MirrorImportIndex.indexedRegion;
 
 /** Reads and validates the preview under the same policy used when rechecking it for execution. */
@@ -94,8 +93,8 @@ final class ChunkImportPlanner {
         }
     }
 
-    Plan plan(Options options, boolean replaceUnindexed, Routing routing, Path destination)
-            throws IOException {
+    Plan plan(Options options, boolean replaceUnindexed, Routing routing, Path destination,
+            boolean saveLocked) throws IOException {
         if (options.mode() != Mode.MIRROR && !Routing.AUTO.equals(routing)) {
             throw new IOException("--world-graph and --replay-source require --mode mirror");
         }
@@ -139,9 +138,9 @@ final class ChunkImportPlanner {
             throw new IOException("timestamp policy requires --mode mirror and a chunk index");
         }
 
-        try (Connection connection = options.mode() == Mode.MIRROR && Files.exists(database)
-                        ? openReadOnlyIndex(database)
-                        : null) {
+        try (var snapshot = MirrorImportIndex.Snapshot.open(
+                     options.mode() == Mode.MIRROR ? database : null, saveLocked)) {
+            Connection connection = snapshot.connection;
             ChunkIndexStore index = connection == null ? null : new ChunkIndexStore(connection, sourceId);
             WritePolicy writePolicy =
                     options.policy() == Policy.TIMESTAMP ? WritePolicy.REPLACE_OLDER : WritePolicy.FILL_EMPTY;

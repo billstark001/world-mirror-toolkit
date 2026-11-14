@@ -18,6 +18,36 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class ChunkImporterTest extends ChunkImportFixture {
     @Test
+    void previewReadsCommittedWalWithoutTouchingTheSave() throws Exception {
+        Path source = source();
+        Path destination = destination();
+        writeMirrorMetadata(destination);
+        writeRegion(source, Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:stone", CAPTURE)));
+        writeRegion(destination, Map.of(new ChunkPos(0, 0), chunk(0, "minecraft:dirt", 0)));
+        Path database = destination.resolve("data/world_mirror.sqlite");
+        Path wal = database.resolveSibling(database.getFileName() + "-wal");
+        Path shm = database.resolveSibling(database.getFileName() + "-shm");
+        try (var connection = openIndex(destination); var statement = connection.createStatement()) {
+            statement.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+            statement.execute("PRAGMA wal_autocheckpoint=0");
+            var index = new ChunkIndexStore(connection, SOURCE);
+            index.recordUpdates("minecraft:overworld",
+                    Map.of(new ChunkIndexStore.ChunkCoordinate(0, 0), CAPTURE + 1),
+                    ChunkIndexStore.REPLAY_IMPORT);
+            byte[] databaseBefore = Files.readAllBytes(database);
+            byte[] walBefore = Files.readAllBytes(wal);
+            byte[] shmBefore = Files.readAllBytes(shm);
+            assertTrue(walBefore.length > 0);
+            var plan = new ChunkImporter().plan(mirrorOptions(source, destination), true);
+            assertEquals(1, plan.preserved());
+            assertEquals(0, plan.chunksToWrite());
+            assertArrayEquals(databaseBefore, Files.readAllBytes(database));
+            assertArrayEquals(walBefore, Files.readAllBytes(wal));
+            assertArrayEquals(shmBefore, Files.readAllBytes(shm));
+        }
+    }
+
+    @Test
     void importsIntoAZeroLengthRegionAndRejectsTruncatedHeaders() throws Exception {
         Path source = source();
         Path destination = destination();

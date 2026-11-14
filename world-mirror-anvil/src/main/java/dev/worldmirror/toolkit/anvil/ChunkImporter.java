@@ -83,7 +83,7 @@ public final class ChunkImporter {
     }
 
     public Plan plan(Options options, boolean replaceUnindexed, Routing routing) throws IOException {
-        return planner.plan(options, replaceUnindexed, routing, options.destination().toRealPath());
+        return planner.plan(options, replaceUnindexed, routing, options.destination().toRealPath(), false);
     }
 
     /** Execute with a retained backup of the affected save files. */

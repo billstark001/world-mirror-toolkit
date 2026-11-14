@@ -37,7 +37,6 @@ import static dev.worldmirror.toolkit.anvil.ImportSavePaths.requirePlainDirector
 import static dev.worldmirror.toolkit.anvil.ImportRegion.matches;
 import static dev.worldmirror.toolkit.anvil.ImportRegion.sha256;
 import static dev.worldmirror.toolkit.anvil.ImportRegion.fingerprint;
-import static dev.worldmirror.toolkit.anvil.MirrorImportIndex.openReadOnlyIndex;
 import static dev.worldmirror.toolkit.anvil.MirrorImportIndex.indexedRegion;
 
 /** Installs a checked plan under the destination lease. */
@@ -79,8 +78,8 @@ final class ChunkImportExecutor {
             if (lock == null)
                 throw new IOException("destination is in use: " + destination);
             // A plan authorizes replacing unindexed chunks only when its preview included such writes.
-            Plan plan =
-                    planner.plan(preview.options(), preview.unindexedReplaced() > 0, routing, destination);
+            Plan plan = planner.plan(
+                    preview.options(), preview.unindexedReplaced() > 0, routing, destination, true);
             if (!plan.equals(preview)) {
                 throw new IOException("import plan changed before the save was locked; review a fresh plan");
             }
@@ -291,7 +290,7 @@ final class ChunkImportExecutor {
 
         // The writer connection is closed before reading committed rows through a separate connection.
         ChunkUpdate first = decisions.getFirst().update();
-        try (Connection db = openReadOnlyIndex(plan.database())) {
+        try (Connection db = MirrorImportIndex.openReadOnly(plan.database())) {
             var index = new ChunkIndexStore(db, plan.sourceId());
             Map<ChunkCoordinate, ChunkRecord> current = indexedRegion(
                     index, first.dimension(), first.coordinate().x() >> 5, first.coordinate().z() >> 5);
